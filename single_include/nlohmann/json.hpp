@@ -20334,7 +20334,8 @@ class binary_writer
         // is in; nothing is allocated unless the document nests
         bson_frame current(&document);
         std::vector<bson_frame> parents;
-        string_t index_name;
+        // string_t need not be default constructible
+        string_t index_name("", 0);
 
         while (true)
         {
@@ -20421,7 +20422,8 @@ class binary_writer
         bson_frame current(&document);
         std::vector<bson_frame> parents;
         std::size_t next_size = 0;
-        string_t index_name;
+        // string_t need not be default constructible
+        string_t index_name("", 0);
 
         while (true)
         {
