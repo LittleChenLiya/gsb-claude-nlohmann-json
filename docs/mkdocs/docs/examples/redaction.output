@@ -1,0 +1,2 @@
+redacted: {"users":[{"name":"alice","token":"t0"},{"name":"bob","token":"***"}],"version":3}
+corrupted input published: false
