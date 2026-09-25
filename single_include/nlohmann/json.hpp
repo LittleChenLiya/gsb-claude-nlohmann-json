@@ -32,6 +32,7 @@
 #include <cstddef> // nullptr_t, ptrdiff_t, size_t
 #include <functional> // hash, less
 #include <initializer_list> // initializer_list
+#include <map> // map
 #ifndef JSON_NO_IO
     #include <iosfwd> // istream, ostream
 #endif  // JSON_NO_IO
@@ -29192,6 +29193,18 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
     static basic_json diff(const basic_json& source, const basic_json& target,
                            const string_t& path = "")
     {
+        // without configured array id keys, keyed_diff compares arrays
+        // positionally, which is exactly the original diff behavior
+        return keyed_diff(source, target, {}, path);
+    }
+
+    /// @brief creates a diff as a JSON patch, matching configured arrays by id
+    /// @sa https://json.nlohmann.me/api/basic_json/keyed_diff/
+    JSON_HEDLEY_WARN_UNUSED_RESULT
+    static basic_json keyed_diff(const basic_json& source, const basic_json& target,
+                                 const std::map<string_t, string_t>& array_id_keys = {},
+                                 const string_t& path = "")
+    {
         // the patch
         basic_json result(value_t::array);
 
@@ -29215,12 +29228,20 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
         {
             case value_t::array:
             {
+                // arrays with a configured id key match their elements by
+                // the value of that key instead of by position
+                const auto id_key_it = array_id_keys.find(path);
+                if (id_key_it != array_id_keys.end())
+                {
+                    return keyed_array_diff(source, target, id_key_it->second, array_id_keys, path);
+                }
+
                 // first pass: traverse common elements
                 std::size_t i = 0;
                 while (i < source.size() && i < target.size())
                 {
                     // recursive call to compare array values at index i
-                    auto temp_diff = diff(source[i], target[i], detail::concat<string_t>(path, '/', detail::to_string<string_t>(i)));
+                    auto temp_diff = keyed_diff(source[i], target[i], array_id_keys, detail::concat<string_t>(path, '/', detail::to_string<string_t>(i)));
                     result.insert(result.end(), temp_diff.begin(), temp_diff.end());
                     ++i;
                 }
@@ -29266,7 +29287,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
                     if (target.find(it.key()) != target.end())
                     {
                         // recursive call to compare object values at key it
-                        auto temp_diff = diff(it.value(), target[it.key()], path_key);
+                        auto temp_diff = keyed_diff(it.value(), target[it.key()], array_id_keys, path_key);
                         result.insert(result.end(), temp_diff.begin(), temp_diff.end());
                     }
                     else
@@ -29318,6 +29339,149 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
 
         return result;
     }
+
+  private:
+    /// @brief collects the ids of a keyed array, validating all elements
+    /// @sa https://json.nlohmann.me/api/basic_json/keyed_diff/
+    static std::vector<basic_json> keyed_array_ids(const basic_json& arr, const string_t& id_key, const string_t& path)
+    {
+        std::vector<basic_json> ids;
+        ids.reserve(arr.size());
+        std::map<basic_json, std::size_t> seen_ids;
+
+        for (std::size_t i = 0; i < arr.size(); ++i)
+        {
+            const auto& element = arr[i];
+            const auto element_path = detail::concat<string_t>(path, '/', detail::to_string<string_t>(i));
+
+            if (JSON_HEDLEY_UNLIKELY(!element.is_object()))
+            {
+                JSON_THROW(type_error::create(318, detail::concat("keyed_diff: element at '", element_path, "' is ", element.type_name(), ", but elements of keyed arrays must be objects"), &arr));
+            }
+
+            const auto id_it = element.find(id_key);
+            if (JSON_HEDLEY_UNLIKELY(id_it == element.end()))
+            {
+                JSON_THROW(type_error::create(318, detail::concat("keyed_diff: object at '", element_path, "' has no id key '", id_key, "'"), &arr));
+            }
+
+            const auto& id = *id_it;
+            if (JSON_HEDLEY_UNLIKELY(!(id.is_string() || id.is_number())))
+            {
+                JSON_THROW(type_error::create(318, detail::concat("keyed_diff: id at '", element_path, "' is ", id.type_name(), ", but ids must be strings or numbers"), &arr));
+            }
+
+            if (JSON_HEDLEY_UNLIKELY(!seen_ids.emplace(id, i).second))
+            {
+                JSON_THROW(type_error::create(318, detail::concat("keyed_diff: duplicate id '", id.dump(), "' at '", element_path, "'"), &arr));
+            }
+
+            ids.push_back(id);
+        }
+
+        return ids;
+    }
+
+    /// @brief creates a diff for a keyed array, matching elements by their id
+    /// @sa https://json.nlohmann.me/api/basic_json/keyed_diff/
+    static basic_json keyed_array_diff(const basic_json& source, const basic_json& target,
+                                       const string_t& id_key,
+                                       const std::map<string_t, string_t>& array_id_keys,
+                                       const string_t& path)
+    {
+        // validate both arrays and collect their ids in order; any
+        // violation rejects the whole diff (no positional fallback)
+        const auto source_ids = keyed_array_ids(source, id_key, path);
+        const auto target_ids = keyed_array_ids(target, id_key, path);
+
+        std::map<basic_json, std::size_t> source_index;
+        for (std::size_t i = 0; i < source_ids.size(); ++i)
+        {
+            source_index.emplace(source_ids[i], i);
+        }
+        std::map<basic_json, std::size_t> target_index;
+        for (std::size_t i = 0; i < target_ids.size(); ++i)
+        {
+            target_index.emplace(target_ids[i], i);
+        }
+
+        basic_json result(value_t::array);
+
+        // working list of ids mirroring the array the emitted operations
+        // are applied to; starts out as the source order
+        std::vector<basic_json> work = source_ids;
+
+        // pass 1: remove elements whose id is not in the target, highest
+        // source index first, so earlier removals do not invalidate the
+        // indices of later ones
+        for (std::size_t j = source_ids.size(); j > 0; --j)
+        {
+            if (target_index.find(work[j - 1]) == target_index.end())
+            {
+                result.push_back(object(
+                {
+                    {"op", "remove"},
+                    {"path", detail::concat<string_t>(path, '/', detail::to_string<string_t>(j - 1))}
+                }));
+                work.erase(work.begin() + static_cast<std::ptrdiff_t>(j - 1));
+            }
+        }
+
+        // pass 2: walk the target positions left to right and bring each
+        // element into place; existing elements are moved, new elements
+        // are added; every index is computed against the current state of
+        // the working list, so the effects of all previous operations are
+        // already accounted for
+        for (std::size_t i = 0; i < target_ids.size(); ++i)
+        {
+            const auto& id = target_ids[i];
+            const auto target_path = detail::concat<string_t>(path, '/', detail::to_string<string_t>(i));
+            const auto work_it = std::find(work.begin(), work.end(), id);
+
+            if (work_it == work.end())
+            {
+                // new element: add the full target value in place
+                result.push_back(
+                {
+                    {"op", "add"}, {"path", target_path}, {"value", target[i]}
+                });
+                work.insert(work.begin() + static_cast<std::ptrdiff_t>(i), id);
+            }
+            else
+            {
+                const auto from = static_cast<std::size_t>(std::distance(work.begin(), work_it));
+                if (from != i)
+                {
+                    // existing element: move it into place
+                    result.push_back(object(
+                    {
+                        {"op", "move"},
+                        {"from", detail::concat<string_t>(path, '/', detail::to_string<string_t>(from))},
+                        {"path", target_path}
+                    }));
+                    work.erase(work_it);
+                    work.insert(work.begin() + static_cast<std::ptrdiff_t>(i), id);
+                }
+            }
+        }
+
+        // pass 3: recursively compare the content of matched elements;
+        // after the operations above, every element resides at its target
+        // index, so all paths are expressed in target indices
+        for (std::size_t i = 0; i < target_ids.size(); ++i)
+        {
+            const auto source_it = source_index.find(target_ids[i]);
+            if (source_it != source_index.end())
+            {
+                auto temp_diff = keyed_diff(source[source_it->second], target[i], array_id_keys, detail::concat<string_t>(path, '/', detail::to_string<string_t>(i)));
+                result.insert(result.end(), temp_diff.begin(), temp_diff.end());
+            }
+        }
+
+        return result;
+    }
+
+  public:
     /// @}
 
     ////////////////////////////////

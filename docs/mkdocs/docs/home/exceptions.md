@@ -771,6 +771,16 @@ The dynamic type of the object cannot be represented in the requested serializat
 
     Encapsulate the JSON value in an object. That is, instead of serializing `#!json true`, serialize `#!json {"value": true}`
 
+### json.exception.type_error.318
+
+The `keyed_diff` function requires every element of a configured array to be an object with a unique string or number id. The whole diff is rejected if an element is not an object, the id key is missing, the id has a disallowed type, or an id occurs more than once.
+
+!!! failure "Example message"
+
+    ```
+    [json.exception.type_error.318] keyed_diff: duplicate id '"a"' at '/1'
+    ```
+
 ## Out of range
 
 This exception is thrown in case a library function is called on an input parameter that exceeds the expected range, for instance, in the case of array indices or nonexisting object keys.
