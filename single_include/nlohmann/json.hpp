@@ -29318,6 +29318,250 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
 
         return result;
     }
+    /// @brief creates a diff as a JSON patch, matching array elements by ID
+    /// @sa https://json.nlohmann.me/api/basic_json/keyed_diff/
+    JSON_HEDLEY_WARN_UNUSED_RESULT
+    static basic_json keyed_diff(const basic_json& source, const basic_json& target,
+                                 const std::map<string_t, string_t>& array_id_fields,
+                                 const string_t& path = "")
+    {
+        // the patch
+        basic_json result(value_t::array);
+
+        if (source.type() != target.type())
+        {
+            // numbers of different types but with the same value (e.g. 1
+            // vs. 1u) need no operation; everything else is replaced
+            if (source == target)
+            {
+                return result;
+            }
+
+            // different types: replace value
+            result.push_back(
+            {
+                {"op", "replace"}, {"path", path}, {"value", target}
+            });
+            return result;
+        }
+
+        switch (source.type())
+        {
+            case value_t::array:
+            {
+                // if this array's path is configured, match its elements by
+                // the value of their ID member instead of by position
+                const auto id_field_it = array_id_fields.find(path);
+                if (id_field_it != array_id_fields.end())
+                {
+                    const string_t& id_key = id_field_it->second;
+
+                    // validate the elements and collect their IDs; a missing,
+                    // duplicated, or non-scalar ID rejects the whole diff
+                    // instead of falling back to possibly mismatched
+                    // positional comparison
+                    std::vector<basic_json> source_ids;
+                    std::vector<basic_json> target_ids;
+                    std::map<basic_json, std::size_t> source_positions;
+                    std::map<basic_json, std::size_t> target_positions;
+
+                    const auto collect_ids = [&id_key, &path](const basic_json & arr,
+                                             std::vector<basic_json>& ids,
+                                             std::map<basic_json, std::size_t>& positions)
+                    {
+                        for (std::size_t idx = 0; idx < arr.size(); ++idx)
+                        {
+                            const auto& element = arr[idx];
+                            if (!element.is_object() || !element.contains(id_key))
+                            {
+                                JSON_THROW(detail::other_error::create(503, detail::concat("keyed_diff: element ", detail::to_string<std::string>(idx), " of array '", path, "' has no ID member '", id_key, "'"), &element));
+                            }
+                            const auto& id = element.at(id_key);
+                            if (!id.is_string() && !id.is_number_integer() && !id.is_number_unsigned())
+                            {
+                                JSON_THROW(detail::other_error::create(504, detail::concat("keyed_diff: ID member '", id_key, "' of element ", detail::to_string<std::string>(idx), " of array '", path, "' must be a string or an integer"), &id));
+                            }
+                            if (!positions.emplace(id, idx).second)
+                            {
+                                JSON_THROW(detail::other_error::create(505, detail::concat("keyed_diff: duplicate ID ", id.dump(), " in array '", path, "'"), &id));
+                            }
+                            ids.push_back(id);
+                        }
+                    };
+
+                    collect_ids(source, source_ids, source_positions);
+                    collect_ids(target, target_ids, target_positions);
+
+                    // working list of IDs mirroring the array that the
+                    // operations generated so far produce when applied one
+                    // by one; all emitted indices refer to this state
+                    std::vector<basic_json> current_ids = source_ids;
+
+                    // remove elements without a counterpart in the target,
+                    // highest index first so earlier indices stay valid
+                    for (std::size_t idx = current_ids.size(); idx > 0; --idx)
+                    {
+                        if (target_positions.find(current_ids[idx - 1]) == target_positions.end())
+                        {
+                            result.push_back(object(
+                            {
+                                {"op", "remove"},
+                                {"path", detail::concat<string_t>(path, '/', detail::to_string<string_t>(idx - 1))}
+                            }));
+                            current_ids.erase(current_ids.begin() + static_cast<std::ptrdiff_t>(idx - 1));
+                        }
+                    }
+
+                    // walk the target in order; after step i, the first i+1
+                    // elements of the working array match target[0..i]
+                    for (std::size_t i = 0; i < target.size(); ++i)
+                    {
+                        const auto& id = target_ids[i];
+                        const auto current_it = std::find(current_ids.begin(), current_ids.end(), id);
+
+                        if (current_it == current_ids.end())
+                        {
+                            // new element: add it at its target position
+                            result.push_back(
+                            {
+                                {"op", "add"},
+                                {"path", detail::concat<string_t>(path, '/', detail::to_string<string_t>(i))},
+                                {"value", target[i]}
+                            });
+                            current_ids.insert(current_ids.begin() + static_cast<std::ptrdiff_t>(i), id);
+                        }
+                        else
+                        {
+                            const auto pos = static_cast<std::size_t>(std::distance(current_ids.begin(), current_it));
+                            if (pos != i)
+                            {
+                                // existing element out of place: move it
+                                result.push_back(object(
+                                {
+                                    {"op", "move"},
+                                    {"from", detail::concat<string_t>(path, '/', detail::to_string<string_t>(pos))},
+                                    {"path", detail::concat<string_t>(path, '/', detail::to_string<string_t>(i))}
+                                }));
+                                current_ids.erase(current_it);
+                                current_ids.insert(current_ids.begin() + static_cast<std::ptrdiff_t>(i), id);
+                            }
+
+                            // compare the matched elements' contents at the
+                            // position the element occupies after any move
+                            auto temp_diff = keyed_diff(source[source_positions[id]], target[i], array_id_fields, detail::concat<string_t>(path, '/', detail::to_string<string_t>(i)));
+                            result.insert(result.end(), temp_diff.begin(), temp_diff.end());
+                        }
+                    }
+
+                    return result;
+                }
+
+                // first pass: traverse common elements
+                std::size_t i = 0;
+                while (i < source.size() && i < target.size())
+                {
+                    // recursive call to compare array values at index i
+                    auto temp_diff = keyed_diff(source[i], target[i], array_id_fields, detail::concat<string_t>(path, '/', detail::to_string<string_t>(i)));
+                    result.insert(result.end(), temp_diff.begin(), temp_diff.end());
+                    ++i;
+                }
+
+                // We now reached the end of at least one array
+                // in a second pass, traverse the remaining elements
+
+                // remove my remaining elements, highest index first; appending
+                // in that order avoids the quadratic reinsertion done before
+                for (std::size_t j = source.size(); j > i; --j)
+                {
+                    result.push_back(object(
+                    {
+                        {"op", "remove"},
+                        {"path", detail::concat<string_t>(path, '/', detail::to_string<string_t>(j - 1))}
+                    }));
+                }
+                i = source.size();
+
+                // add other remaining elements
+                while (i < target.size())
+                {
+                    result.push_back(
+                    {
+                        {"op", "add"},
+                        {"path", detail::concat<string_t>(path, "/-")},
+                        {"value", target[i]}
+                    });
+                    ++i;
+                }
+
+                break;
+            }
+
+            case value_t::object:
+            {
+                // first pass: traverse this object's elements
+                for (auto it = source.cbegin(); it != source.cend(); ++it)
+                {
+                    // escape the key name to be used in a JSON patch
+                    const auto path_key = detail::concat<string_t>(path, '/', detail::escape(it.key()));
+
+                    if (target.find(it.key()) != target.end())
+                    {
+                        // recursive call to compare object values at key it
+                        auto temp_diff = keyed_diff(it.value(), target[it.key()], array_id_fields, path_key);
+                        result.insert(result.end(), temp_diff.begin(), temp_diff.end());
+                    }
+                    else
+                    {
+                        // found a key that is not in o -> remove it
+                        result.push_back(object(
+                        {
+                            {"op", "remove"}, {"path", path_key}
+                        }));
+                    }
+                }
+
+                // second pass: traverse other object's elements
+                for (auto it = target.cbegin(); it != target.cend(); ++it)
+                {
+                    if (source.find(it.key()) == source.end())
+                    {
+                        // found a key that is not in this -> add it
+                        const auto path_key = detail::concat<string_t>(path, '/', detail::escape(it.key()));
+                        result.push_back(
+                        {
+                            {"op", "add"}, {"path", path_key},
+                            {"value", it.value()}
+                        });
+                    }
+                }
+
+                break;
+            }
+
+            case value_t::null:
+            case value_t::string:
+            case value_t::boolean:
+            case value_t::number_integer:
+            case value_t::number_unsigned:
+            case value_t::number_float:
+            case value_t::binary:
+            case value_t::discarded:
+            default:
+            {
+                // both primitive types: replace value if different
+                if (source != target)
+                {
+                    result.push_back(
+                    {
+                        {"op", "replace"}, {"path", path}, {"value", target}
+                    });
+                }
+                break;
+            }
+        }
+
+        return result;
+    }
     /// @}
 
     ////////////////////////////////

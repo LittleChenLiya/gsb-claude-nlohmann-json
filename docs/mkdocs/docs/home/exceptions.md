@@ -1018,3 +1018,39 @@ A JSON Patch operation 'test' failed. The unsuccessful operation is also printed
 
     This exception was added in version 3.13.0. Before that, debug builds aborted on an assertion and release builds
     wrote a `$` marker without `#`, which [`from_ubjson`](../api/basic_json/from_ubjson.md) then rejected.
+
+### json.exception.other_error.503
+
+An array addressed by the `array_id_fields` parameter of [`keyed_diff`](../api/basic_json/keyed_diff.md) contains an
+element that is not an object or has no member with the configured ID name. The diff is rejected; there is no
+fallback to positional comparison.
+
+!!! failure "Example message"
+
+    ```
+    [json.exception.other_error.503] keyed_diff: element 1 of array '/items' has no ID member 'id'
+    ```
+
+### json.exception.other_error.504
+
+The ID member of an element of an array addressed by the `array_id_fields` parameter of
+[`keyed_diff`](../api/basic_json/keyed_diff.md) is neither a string nor an integer. Only strings and integers (signed and unsigned) are
+supported as element identities.
+
+!!! failure "Example message"
+
+    ```
+    [json.exception.other_error.504] keyed_diff: ID member 'id' of element 0 of array '/items' must be a string or an integer
+    ```
+
+### json.exception.other_error.505
+
+An ID occurs more than once in an array addressed by the `array_id_fields` parameter of
+[`keyed_diff`](../api/basic_json/keyed_diff.md). Element identities must be unique within their array; otherwise, matching source and
+target elements would be ambiguous.
+
+!!! failure "Example message"
+
+    ```
+    [json.exception.other_error.505] keyed_diff: duplicate ID "a" in array '/items'
+    ```

@@ -1,0 +1,39 @@
+[
+    {
+        "op": "remove",
+        "path": "/1"
+    },
+    {
+        "from": "/1",
+        "op": "move",
+        "path": "/0"
+    },
+    {
+        "op": "replace",
+        "path": "/0/value",
+        "value": 42
+    },
+    {
+        "op": "add",
+        "path": "/2",
+        "value": {
+            "id": "d",
+            "value": 4
+        }
+    }
+]
+
+[
+    {
+        "id": "c",
+        "value": 42
+    },
+    {
+        "id": "a",
+        "value": 1
+    },
+    {
+        "id": "d",
+        "value": 4
+    }
+]

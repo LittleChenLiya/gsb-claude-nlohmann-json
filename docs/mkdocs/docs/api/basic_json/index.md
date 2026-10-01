@@ -277,6 +277,7 @@ Access to the JSON value
 - [**patch**](patch.md) - applies a JSON patch
 - [**patch_inplace**](patch_inplace.md) - applies a JSON patch in place
 - [**diff**](diff.md) (_static_) - creates a diff as a JSON patch
+- [**keyed_diff**](keyed_diff.md) (_static_) - creates a diff as a JSON patch, matching configured arrays by element ID
 
 ### JSON Merge Patch functions
 
