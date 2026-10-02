@@ -415,6 +415,103 @@ class binary_writer
     }
 
     /*!
+    @brief create a deterministic (canonical) CBOR serialization
+
+    Follows the deterministic encoding rules of RFC 8949, Section 4.2:
+    - integers and length fields use the shortest possible encoding
+    - floating-point values use the shortest of half-, single-, or
+      double-precision that represents the value losslessly; NaN is
+      always encoded as 0xf97e00; the sign of -0.0 is preserved
+    - object keys are sorted by their encoded length first, then
+      bytewise lexicographically (length-first ordering); keys are not
+      merely sorted as JSON strings
+    - array order is preserved
+
+    The input value is only read, never modified.
+
+    @param[in] j  JSON value to serialize
+    */
+    void write_cbor_deterministic(const BasicJsonType& j)
+    {
+        switch (j.type())
+        {
+            case value_t::number_float:
+            {
+                write_cbor_deterministic_float(j.m_data.m_value.number_float);
+                break;
+            }
+
+            case value_t::array:
+            {
+                // step 1: write control byte and the array size
+                write_cbor_deterministic_head(0x80, j.m_data.m_value.array->size());
+
+                // step 2: write each element (order is preserved)
+                for (const auto& el : *j.m_data.m_value.array)
+                {
+                    write_cbor_deterministic(el);
+                }
+                break;
+            }
+
+            case value_t::object:
+            {
+                const auto& obj = *j.m_data.m_value.object;
+
+                // step 1: write control byte and the object size
+                write_cbor_deterministic_head(0xA0, obj.size());
+
+                // step 2: encode each key and sort the entries by the
+                // encoded key's length first, then bytewise
+                // lexicographically (RFC 8949, Section 4.2.1)
+                std::vector<std::pair<std::vector<std::uint8_t>, const BasicJsonType*>> entries;
+                entries.reserve(obj.size());
+                for (const auto& el : obj)
+                {
+                    entries.emplace_back(encode_cbor_key(el.first), &el.second);
+                }
+                std::sort(entries.begin(), entries.end(),
+                          [](const std::pair<std::vector<std::uint8_t>, const BasicJsonType*>& lhs,
+                             const std::pair<std::vector<std::uint8_t>, const BasicJsonType*>& rhs)
+                {
+                    if (lhs.first.size() != rhs.first.size())
+                    {
+                        return lhs.first.size() < rhs.first.size();
+                    }
+                    return lhs.first < rhs.first;
+                });
+
+                // step 3: write each element
+                for (const auto& entry : entries)
+                {
+                    oa->write_characters(
+                        reinterpret_cast<const CharType*>(entry.first.data()),
+                        entry.first.size());
+                    write_cbor_deterministic(*entry.second);
+                }
+                break;
+            }
+
+            case value_t::null:
+            case value_t::boolean:
+            case value_t::number_integer:
+            case value_t::number_unsigned:
+            case value_t::string:
+            case value_t::binary:
+            {
+                // scalars other than floats are already encoded
+                // deterministically (shortest form) by write_cbor()
+                write_cbor(j);
+                break;
+            }
+
+            case value_t::discarded:
+            default:
+                break;
+        }
+    }
+
+    /*!
     @param[in] j  JSON value to serialize
     */
     void write_msgpack(const BasicJsonType& j)
@@ -1982,6 +2079,210 @@ class binary_writer
                                 ? get_cbor_float_prefix(n)
                                 : get_msgpack_float_prefix(n));
             write_number(n);
+        }
+#ifdef __GNUC__
+        JSON_HEDLEY_DIAGNOSTIC_POP
+#endif
+    }
+
+    /// write a CBOR head: the major-type base byte followed by the
+    /// shortest possible encoding of the given length/count
+    void write_cbor_deterministic_head(const std::uint8_t base, const std::uint64_t N)
+    {
+        if (N <= 0x17)
+        {
+            write_number(static_cast<std::uint8_t>(base + N));
+        }
+        else if (N <= (std::numeric_limits<std::uint8_t>::max)())
+        {
+            oa->write_character(to_char_type(base + 0x18));
+            write_number(static_cast<std::uint8_t>(N));
+        }
+        else if (N <= (std::numeric_limits<std::uint16_t>::max)())
+        {
+            oa->write_character(to_char_type(base + 0x19));
+            write_number(static_cast<std::uint16_t>(N));
+        }
+        else if (N <= (std::numeric_limits<std::uint32_t>::max)())
+        {
+            oa->write_character(to_char_type(base + 0x1A));
+            write_number(static_cast<std::uint32_t>(N));
+        }
+        // LCOV_EXCL_START
+        else
+        {
+            oa->write_character(to_char_type(base + 0x1B));
+            write_number(static_cast<std::uint64_t>(N));
+        }
+        // LCOV_EXCL_STOP
+    }
+
+    /// encode an object key (text string, major type 3) using the
+    /// shortest possible length encoding; used for deterministic
+    /// key ordering
+    static std::vector<std::uint8_t> encode_cbor_key(const string_t& key)
+    {
+        std::vector<std::uint8_t> result;
+        const auto N = key.size();
+        if (N <= 0x17)
+        {
+            result.push_back(static_cast<std::uint8_t>(0x60 + N));
+        }
+        else if (N <= (std::numeric_limits<std::uint8_t>::max)())
+        {
+            result.push_back(0x78);
+            result.push_back(static_cast<std::uint8_t>(N));
+        }
+        else if (N <= (std::numeric_limits<std::uint16_t>::max)())
+        {
+            result.push_back(0x79);
+            result.push_back(static_cast<std::uint8_t>((N >> 8) & 0xFF));
+            result.push_back(static_cast<std::uint8_t>(N & 0xFF));
+        }
+        // LCOV_EXCL_START
+        else if (N <= (std::numeric_limits<std::uint32_t>::max)())
+        {
+            result.push_back(0x7A);
+            for (int i = 24; i >= 0; i -= 8)
+            {
+                result.push_back(static_cast<std::uint8_t>((N >> i) & 0xFF));
+            }
+        }
+        else
+        {
+            result.push_back(0x7B);
+            for (int i = 56; i >= 0; i -= 8)
+            {
+                result.push_back(static_cast<std::uint8_t>((static_cast<std::uint64_t>(N) >> i) & 0xFF));
+            }
+        }
+        // LCOV_EXCL_STOP
+        result.insert(result.end(), key.begin(), key.end());
+        return result;
+    }
+
+    /// convert a finite double to half-precision bits, rounding to
+    /// nearest, ties to even; the sign of zero is preserved
+    static std::uint16_t double_to_half_bits(const double d) noexcept
+    {
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &d, sizeof(bits));
+        const auto sign = static_cast<std::uint16_t>((bits >> 48) & 0x8000u);
+        const int exponent = static_cast<int>((bits >> 52) & 0x7FFu) - 1023;
+        const std::uint64_t mantissa = bits & 0x000FFFFFFFFFFFFFuLL;
+
+        if (exponent > 15)
+        {
+            // overflow: rounds to infinity; the round-trip check in
+            // write_cbor_deterministic_float() rejects this candidate
+            return static_cast<std::uint16_t>(sign | 0x7C00u);
+        }
+        if (exponent < -24)
+        {
+            // underflow: rounds to zero (sign preserved)
+            return sign;
+        }
+        if (exponent >= -14)
+        {
+            // normal half-precision number: round the mantissa from
+            // 52 to 10 bits, round to nearest, ties to even
+            std::uint64_t m = mantissa >> 42;
+            const std::uint64_t remainder = mantissa & 0x3FFFFFFFFFFuLL;
+            if (remainder > 0x20000000000uLL ||
+                    (remainder == 0x20000000000uLL && (m & 1u) != 0u))
+            {
+                ++m;
+            }
+            int e = exponent;
+            if (m == 0x400u)
+            {
+                // mantissa overflow: renormalize
+                m = 0;
+                ++e;
+                if (e > 15)
+                {
+                    return static_cast<std::uint16_t>(sign | 0x7C00u);
+                }
+            }
+            return static_cast<std::uint16_t>(sign |
+                                              (static_cast<std::uint16_t>(e + 15) << 10) |
+                                              static_cast<std::uint16_t>(m));
+        }
+        // subnormal half-precision number
+        const std::uint64_t full_mantissa = mantissa | 0x0010000000000000uLL;
+        const int shift = 28 - exponent; // 43..52
+        std::uint64_t m = full_mantissa >> shift;
+        const std::uint64_t remainder = full_mantissa & ((1uLL << shift) - 1uLL);
+        const std::uint64_t halfway = 1uLL << (shift - 1);
+        if (remainder > halfway || (remainder == halfway && (m & 1u) != 0u))
+        {
+            ++m; // may round up to the smallest normal number
+        }
+        return static_cast<std::uint16_t>(sign | static_cast<std::uint16_t>(m));
+    }
+
+    /// convert half-precision bits back to a double
+    static double half_bits_to_double(const std::uint16_t h) noexcept
+    {
+        const double sign = (h & 0x8000u) != 0u ? -1.0 : 1.0;
+        const int exponent = (h >> 10) & 0x1F;
+        const std::uint32_t mantissa = h & 0x3FFu;
+        if (exponent == 0)
+        {
+            return sign * std::ldexp(static_cast<double>(mantissa), -24);
+        }
+        if (exponent == 31)
+        {
+            return mantissa == 0u
+                   ? sign * std::numeric_limits<double>::infinity()
+                   : std::numeric_limits<double>::quiet_NaN();
+        }
+        return sign * std::ldexp(static_cast<double>(mantissa | 0x400u), exponent - 25);
+    }
+
+    /// write a floating-point value in the shortest of half-, single-,
+    /// or double-precision that represents it losslessly; NaN is
+    /// always encoded as 0xf97e00; the sign of -0.0 is preserved
+    void write_cbor_deterministic_float(const number_float_t n)
+    {
+#ifdef __GNUC__
+        JSON_HEDLEY_DIAGNOSTIC_PUSH
+        JSON_HEDLEY_PRAGMA(GCC diagnostic ignored "-Wfloat-equal")
+#endif
+        if (std::isnan(n))
+        {
+            // NaN is always encoded as 0xf97e00
+            oa->write_character(to_char_type(0xF9));
+            oa->write_character(to_char_type(0x7E));
+            oa->write_character(to_char_type(0x00));
+        }
+        else if (std::isinf(n))
+        {
+            // Infinity is 0xf97c00, -Infinity is 0xf9fc00
+            oa->write_character(to_char_type(0xF9));
+            oa->write_character(n > 0 ? to_char_type(0x7C) : to_char_type(0xFC));
+            oa->write_character(to_char_type(0x00));
+        }
+        else
+        {
+            const double d = static_cast<double>(n);
+            const std::uint16_t half = double_to_half_bits(d);
+            const double roundtrip = half_bits_to_double(half);
+            if (roundtrip == d && std::signbit(roundtrip) == std::signbit(d))
+            {
+                oa->write_character(to_char_type(0xF9));
+                write_number(half);
+            }
+            else if (static_cast<double>(static_cast<float>(n)) == d)
+            {
+                oa->write_character(to_char_type(0xFA));
+                write_number(static_cast<float>(n));
+            }
+            else
+            {
+                oa->write_character(to_char_type(0xFB));
+                write_number(n);
+            }
         }
 #ifdef __GNUC__
         JSON_HEDLEY_DIAGNOSTIC_POP

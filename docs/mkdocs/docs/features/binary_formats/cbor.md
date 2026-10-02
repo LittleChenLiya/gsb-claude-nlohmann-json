@@ -110,6 +110,14 @@ see "binary" cells in the table above.
     --8<-- "examples/to_cbor.output"
     ```
 
+!!! info "Deterministic encoding"
+
+    For use cases that require a stable byte representation of a JSON value (e.g., hashing or digital signatures),
+    use [`to_cbor_deterministic`](../../api/basic_json/to_cbor_deterministic.md). It implements the deterministic
+    encoding rules of [RFC 8949, Section 4.2](https://www.rfc-editor.org/rfc/rfc8949.html#section-4.2): object keys
+    are sorted by encoded length first, then bytewise; integers, lengths, and floats use the shortest lossless
+    encoding; NaN has a fixed encoding; and the sign of `-0.0` is preserved.
+
 ## Deserialization
 
 The library maps CBOR types to JSON value types as follows:

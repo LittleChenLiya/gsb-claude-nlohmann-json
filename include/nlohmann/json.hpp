@@ -4456,6 +4456,29 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
         binary_writer<char>(o).write_cbor(j);
     }
 
+    /// @brief create a deterministic CBOR serialization of a given JSON value
+    /// @sa https://json.nlohmann.me/api/basic_json/to_cbor_deterministic/
+    static std::vector<std::uint8_t> to_cbor_deterministic(const basic_json& j)
+    {
+        std::vector<std::uint8_t> result;
+        to_cbor_deterministic(j, result);
+        return result;
+    }
+
+    /// @brief create a deterministic CBOR serialization of a given JSON value
+    /// @sa https://json.nlohmann.me/api/basic_json/to_cbor_deterministic/
+    static void to_cbor_deterministic(const basic_json& j, detail::output_adapter<std::uint8_t> o)
+    {
+        binary_writer<std::uint8_t>(o).write_cbor_deterministic(j);
+    }
+
+    /// @brief create a deterministic CBOR serialization of a given JSON value
+    /// @sa https://json.nlohmann.me/api/basic_json/to_cbor_deterministic/
+    static void to_cbor_deterministic(const basic_json& j, detail::output_adapter<char> o)
+    {
+        binary_writer<char>(o).write_cbor_deterministic(j);
+    }
+
     /// @brief create a MessagePack serialization of a given JSON value
     /// @sa https://json.nlohmann.me/api/basic_json/to_msgpack/
     static std::vector<std::uint8_t> to_msgpack(const basic_json& j)
