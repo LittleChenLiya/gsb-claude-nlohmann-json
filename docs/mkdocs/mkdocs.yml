@@ -80,6 +80,7 @@ nav:
       - features/merge_patch.md
       - features/json_patch.md
       - features/json_pointer.md
+      - features/redaction.md
       - features/modifying_values.md
       - features/modules.md
       - 'nlohmann Namespace': features/namespace.md

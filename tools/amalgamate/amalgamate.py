@@ -236,7 +236,7 @@ class TranslationUnit(object):
             include_match, found_included_path = include
             tmp_content += self.content[prev_end:include_match.start()]
             tmp_content += "// {0}\n".format(include_match.group(0))
-            if found_included_path not in self.amalgamation.included_files:
+            if os.path.normpath(found_included_path) not in self.amalgamation.included_files:
                 t = TranslationUnit(found_included_path, self.amalgamation, False)
                 tmp_content += t.content
             prev_end = include_match.end()
@@ -257,7 +257,7 @@ class TranslationUnit(object):
         self.amalgamation = amalgamation
         self.is_root = is_root
 
-        self.amalgamation.included_files.append(self.file_path)
+        self.amalgamation.included_files.append(os.path.normpath(self.file_path))
 
         actual_path = self.amalgamation.actual_path(file_path)
         if not os.path.isfile(actual_path):

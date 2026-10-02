@@ -19,6 +19,7 @@ C++ types, and finally serialize it again.
   checked ([`at`](element_access/checked_access.md)), and access with a
   [default value](element_access/default_value.md).
 - [JSON Pointer](json_pointer.md) — address values deep inside a document with [RFC 6901](https://tools.ietf.org/html/rfc6901) pointers.
+- [Streaming redaction](redaction.md) — replace exact JSON Pointer subtrees while streaming, with all-or-nothing publishing.
 - [Iterators](iterators.md) — traverse arrays and objects.
 - [Modifying values](modifying_values.md) — add, update, merge, and remove elements.
 - [JSON Patch and Diff](json_patch.md) and [JSON Merge Patch](merge_patch.md) — apply and compute structured changes.

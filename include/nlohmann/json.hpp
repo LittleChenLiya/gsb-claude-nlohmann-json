@@ -5643,6 +5643,8 @@ struct formatter<nlohmann::NLOHMANN_BASIC_JSON_TPL, char> // NOLINT(cert-dcl58-c
     #endif
 #endif
 
+#include <nlohmann/redactor.hpp>
+
 #include <nlohmann/detail/macro_unscope.hpp>
 
 // End of GCC diagnostic pragmas for C++ modules support
