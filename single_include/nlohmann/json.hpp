@@ -3824,71 +3824,71 @@ NLOHMANN_JSON_NAMESPACE_END
 // SPDX-License-Identifier: MIT
 
 #ifndef INCLUDE_NLOHMANN_JSON_FWD_HPP_
-    #define INCLUDE_NLOHMANN_JSON_FWD_HPP_
+#define INCLUDE_NLOHMANN_JSON_FWD_HPP_
 
-    #include <cstdint> // int64_t, uint64_t
-    #include <map> // map
-    #include <memory> // allocator
-    #include <string> // string
-    #include <vector> // vector
+#include <cstdint> // int64_t, uint64_t
+#include <map> // map
+#include <memory> // allocator
+#include <string> // string
+#include <vector> // vector
 
-    // #include <nlohmann/detail/abi_macros.hpp>
+// #include <nlohmann/detail/abi_macros.hpp>
 
 
-    /*!
-    @brief namespace for Niels Lohmann
-    @see https://github.com/nlohmann
-    @since version 1.0.0
-    */
-    NLOHMANN_JSON_NAMESPACE_BEGIN
+/*!
+@brief namespace for Niels Lohmann
+@see https://github.com/nlohmann
+@since version 1.0.0
+*/
+NLOHMANN_JSON_NAMESPACE_BEGIN
 
-    /*!
-    @brief default JSONSerializer template argument
+/*!
+@brief default JSONSerializer template argument
 
-    This serializer ignores the template arguments and uses ADL
-    ([argument-dependent lookup](https://en.cppreference.com/w/cpp/language/adl))
-    for serialization.
-    */
-    template<typename T = void, typename SFINAE = void>
-    struct adl_serializer;
+This serializer ignores the template arguments and uses ADL
+([argument-dependent lookup](https://en.cppreference.com/w/cpp/language/adl))
+for serialization.
+*/
+template<typename T = void, typename SFINAE = void>
+struct adl_serializer;
 
-    /// a class to store JSON values
-    /// @sa https://json.nlohmann.me/api/basic_json/
-    template<template<typename U, typename V, typename... Args> class ObjectType =
-    std::map,
-    template<typename U, typename... Args> class ArrayType = std::vector,
-    class StringType = std::string, class BooleanType = bool,
-    class NumberIntegerType = std::int64_t,
-    class NumberUnsignedType = std::uint64_t,
-    class NumberFloatType = double,
-    template<typename U> class AllocatorType = std::allocator,
-    template<typename T, typename SFINAE = void> class JSONSerializer =
-    adl_serializer,
-    class BinaryType = std::vector<std::uint8_t>, // cppcheck-suppress syntaxError
-    class CustomBaseClass = void>
-    class basic_json;
+/// a class to store JSON values
+/// @sa https://json.nlohmann.me/api/basic_json/
+template<template<typename U, typename V, typename... Args> class ObjectType =
+         std::map,
+         template<typename U, typename... Args> class ArrayType = std::vector,
+         class StringType = std::string, class BooleanType = bool,
+         class NumberIntegerType = std::int64_t,
+         class NumberUnsignedType = std::uint64_t,
+         class NumberFloatType = double,
+         template<typename U> class AllocatorType = std::allocator,
+         template<typename T, typename SFINAE = void> class JSONSerializer =
+         adl_serializer,
+         class BinaryType = std::vector<std::uint8_t>, // cppcheck-suppress syntaxError
+         class CustomBaseClass = void>
+class basic_json;
 
-    /// @brief JSON Pointer defines a string syntax for identifying a specific value within a JSON document
-    /// @sa https://json.nlohmann.me/api/json_pointer/
-    template<typename RefStringType>
-    class json_pointer;
+/// @brief JSON Pointer defines a string syntax for identifying a specific value within a JSON document
+/// @sa https://json.nlohmann.me/api/json_pointer/
+template<typename RefStringType>
+class json_pointer;
 
-    /*!
-    @brief default specialization
-    @sa https://json.nlohmann.me/api/json/
-    */
-    using json = basic_json<>;
+/*!
+@brief default specialization
+@sa https://json.nlohmann.me/api/json/
+*/
+using json = basic_json<>;
 
-    /// @brief a minimal map-like container that preserves insertion order
-    /// @sa https://json.nlohmann.me/api/ordered_map/
-    template<class Key, class T, class IgnoredLess, class Allocator>
-    struct ordered_map;
+/// @brief a minimal map-like container that preserves insertion order
+/// @sa https://json.nlohmann.me/api/ordered_map/
+template<class Key, class T, class IgnoredLess, class Allocator>
+struct ordered_map;
 
-    /// @brief specialization that maintains the insertion order of object keys
-    /// @sa https://json.nlohmann.me/api/ordered_json/
-    using ordered_json = basic_json<nlohmann::ordered_map>;
+/// @brief specialization that maintains the insertion order of object keys
+/// @sa https://json.nlohmann.me/api/ordered_json/
+using ordered_json = basic_json<nlohmann::ordered_map>;
 
-    NLOHMANN_JSON_NAMESPACE_END
+NLOHMANN_JSON_NAMESPACE_END
 
 #endif  // INCLUDE_NLOHMANN_JSON_FWD_HPP_
 
@@ -6007,7 +6007,7 @@ NLOHMANN_JSON_NAMESPACE_END
 
 
 // #include <nlohmann/detail/macro_scope.hpp>
-// JSON_HAS_CPP_17
+ // JSON_HAS_CPP_17
 #ifdef JSON_HAS_CPP_17
     #include <optional> // optional
 #endif
@@ -18533,15 +18533,16 @@ NLOHMANN_JSON_NAMESPACE_END
 
 
 
-#include <algorithm> // reverse
+#include <algorithm> // reverse, sort, lexicographical_compare
 #include <array> // array
 #include <map> // map
 #include <cmath> // isnan, isinf
 #include <cstdint> // uint8_t, uint16_t, uint32_t, uint64_t
 #include <cstring> // memcpy
+#include <iterator> // advance
 #include <limits> // numeric_limits
 #include <string> // string
-#include <utility> // move
+#include <utility> // move, pair
 #include <vector> // vector
 
 // #include <nlohmann/detail/input/binary_reader.hpp>
@@ -19088,6 +19089,169 @@ class binary_writer
             case value_t::discarded:
             default:
                 break;
+        }
+    }
+
+    /*!
+    @param[in] j  JSON value to serialize
+
+    @brief deterministic CBOR serialization
+
+    Serializes @a j to CBOR like @a write_cbor, but with additional rules
+    to make the output deterministic for a given JSON value, so it can be
+    used as the input to a signature or hash:
+
+    - Maps are written with a definite length, and their keys are sorted by
+      the length of their encoded key data item (shorter first), then by
+      bytewise lexicographic order of the encoded key bytes. The sorting is
+      performed on the encoded keys, not on the JSON key strings, so it does
+      not depend on the order in which the keys were inserted.
+    - Integers and lengths use the shortest legal encoding.
+    - Floating-point numbers use the shortest format that can represent the
+      value without loss (half-precision, then single-precision, then
+      double-precision). NaN is encoded uniformly as half-precision quiet
+      NaN (`0xf9 0x7e 0x00`), and the sign of `-0.0` is preserved.
+    - The order of array elements is preserved.
+
+    @note The JSON value @a j is only read; it is never modified.
+    */
+    void write_cbor_deterministic(const BasicJsonType& j)
+    {
+        switch (j.type())
+        {
+            case value_t::object:
+            {
+                // step 1: write control byte and the object size
+                const auto N = j.m_data.m_value.object->size();
+                if (N <= 0x17)
+                {
+                    write_number(static_cast<std::uint8_t>(0xA0 + N));
+                }
+                else if (N <= (std::numeric_limits<std::uint8_t>::max)())
+                {
+                    oa->write_character(to_char_type(0xB8));
+                    write_number(static_cast<std::uint8_t>(N));
+                }
+                else if (N <= (std::numeric_limits<std::uint16_t>::max)())
+                {
+                    oa->write_character(to_char_type(0xB9));
+                    write_number(static_cast<std::uint16_t>(N));
+                }
+                else if (N <= (std::numeric_limits<std::uint32_t>::max)())
+                {
+                    oa->write_character(to_char_type(0xBA));
+                    write_number(static_cast<std::uint32_t>(N));
+                }
+                // LCOV_EXCL_START
+                else if (N <= (std::numeric_limits<std::uint64_t>::max)())
+                {
+                    oa->write_character(to_char_type(0xBB));
+                    write_number(static_cast<std::uint64_t>(N));
+                }
+                // LCOV_EXCL_STOP
+
+                // step 2: encode each key to bytes and remember its element
+                // index, then sort the entries by encoded key length, then by
+                // bytewise lexicographic order of the encoded key bytes
+                using key_entry_t = std::pair<std::vector<CharType>, std::size_t>;
+                std::vector<key_entry_t> entries;
+                entries.reserve(N);
+                std::size_t index = 0;
+                for (const auto& el : *j.m_data.m_value.object)
+                {
+                    std::vector<CharType> key_bytes;
+                    binary_writer<BasicJsonType, CharType> key_writer{output_adapter<CharType>(key_bytes)};
+                    key_writer.write_cbor_deterministic(el.first);
+                    entries.emplace_back(std::move(key_bytes), index++);
+                }
+
+                std::sort(entries.begin(), entries.end(),
+                          [](const key_entry_t& a, const key_entry_t& b)
+                {
+                    if (a.first.size() != b.first.size())
+                    {
+                        return a.first.size() < b.first.size();
+                    }
+                    return std::lexicographical_compare(
+                               a.first.begin(), a.first.end(),
+                               b.first.begin(), b.first.end(),
+                               [](CharType x, CharType y)
+                    {
+                        return static_cast<std::uint8_t>(x) < static_cast<std::uint8_t>(y);
+                    });
+                });
+
+                // step 3: write each element in the determined key order
+                for (const auto& entry : entries)
+                {
+                    oa->write_characters(entry.first.data(), entry.first.size());
+                    auto it = j.m_data.m_value.object->begin();
+                    std::advance(it, static_cast<typename BasicJsonType::object_t::difference_type>(entry.second));
+                    write_cbor_deterministic(it->second);
+                }
+                break;
+            }
+
+            case value_t::array:
+            {
+                // step 1: write control byte and the array size
+                const auto N = j.m_data.m_value.array->size();
+                if (N <= 0x17)
+                {
+                    write_number(static_cast<std::uint8_t>(0x80 + N));
+                }
+                else if (N <= (std::numeric_limits<std::uint8_t>::max)())
+                {
+                    oa->write_character(to_char_type(0x98));
+                    write_number(static_cast<std::uint8_t>(N));
+                }
+                else if (N <= (std::numeric_limits<std::uint16_t>::max)())
+                {
+                    oa->write_character(to_char_type(0x99));
+                    write_number(static_cast<std::uint16_t>(N));
+                }
+                else if (N <= (std::numeric_limits<std::uint32_t>::max)())
+                {
+                    oa->write_character(to_char_type(0x9A));
+                    write_number(static_cast<std::uint32_t>(N));
+                }
+                // LCOV_EXCL_START
+                else if (N <= (std::numeric_limits<std::uint64_t>::max)())
+                {
+                    oa->write_character(to_char_type(0x9B));
+                    write_number(static_cast<std::uint64_t>(N));
+                }
+                // LCOV_EXCL_STOP
+
+                // step 2: write each element in the original order
+                for (const auto& el : *j.m_data.m_value.array)
+                {
+                    write_cbor_deterministic(el);
+                }
+                break;
+            }
+
+            case value_t::number_float:
+            {
+                write_cbor_float_deterministic(j.m_data.m_value.number_float);
+                break;
+            }
+
+            case value_t::null:
+            case value_t::boolean:
+            case value_t::number_integer:
+            case value_t::number_unsigned:
+            case value_t::string:
+            case value_t::binary:
+            case value_t::discarded:
+            default:
+            {
+                // integers, strings, binary values, booleans, and null are
+                // already emitted with the shortest legal encoding by
+                // write_cbor
+                write_cbor(j);
+                break;
+            }
         }
     }
 
@@ -20033,6 +20197,194 @@ class binary_writer
     static constexpr CharType get_cbor_float_prefix(double /*unused*/)
     {
         return to_char_type(0xFB);  // Double-Precision Float
+    }
+
+    /*!
+    @brief the bit pattern of @a d
+
+    @note NaN bit patterns are never compared; NaN is written with a single
+          unified encoding by write_cbor_float_deterministic.
+    */
+    static std::uint64_t double_to_bits(const double d) noexcept
+    {
+        std::uint64_t bits{};
+        std::memcpy(&bits, &d, sizeof(d));
+        return bits;
+    }
+
+    /*!
+    @brief convert a double to its IEEE 754 half-precision (binary16) bit
+           pattern, rounding to nearest with ties to even
+
+    @pre @a d is finite and not a NaN
+    */
+    static std::uint16_t double_to_half(const double d) noexcept
+    {
+        const auto bits = double_to_bits(d);
+        const auto sign = static_cast<std::uint32_t>((bits >> 63) & 1u);
+        const auto exp = static_cast<std::int64_t>((bits >> 52) & 0x7ffULL) - 1023;
+        const auto mant = bits & 0xfffffffffffffULL;
+
+        // infinity (exponent all ones, zero mantissa)
+        if (exp == 1024 && mant == 0)
+        {
+            return static_cast<std::uint16_t>((sign << 15) | 0x7c00u);
+        }
+
+        // zero or a subnormal double: all are smaller than the smallest
+        // subnormal half, so they round to zero (with the sign preserved)
+        if (exp <= -1023)
+        {
+            return static_cast<std::uint16_t>(sign << 15);
+        }
+
+        // normal double: value = (1 + mant / 2^52) * 2^exp
+        if (exp >= 16)
+        {
+            // overflow to infinity
+            return static_cast<std::uint16_t>((sign << 15) | 0x7c00u);
+        }
+
+        if (exp >= -14)
+        {
+            // normal half result: the top 10 mantissa bits are kept, the
+            // remaining 42 bits are rounded to nearest with ties to even
+            auto half_mant = static_cast<std::uint32_t>(mant >> 42);
+            const auto remainder = mant & ((1ULL << 42) - 1);
+            const auto half_bit = 1ULL << 41;
+            if (remainder > half_bit || (remainder == half_bit && (half_mant & 1u) != 0))
+            {
+                ++half_mant;
+                if (half_mant == 0x400u)
+                {
+                    // the mantissa rounded up to 2.0, increasing the exponent
+                    return static_cast<std::uint16_t>((sign << 15) | ((exp + 1 + 15) << 10));
+                }
+            }
+            return static_cast<std::uint16_t>((sign << 15) | ((exp + 15) << 10) | half_mant);
+        }
+
+        if (exp >= -25)
+        {
+            // subnormal half result: value = m * 2^-24 with m rounded to
+            // nearest with ties to even
+            const auto shift = static_cast<int>(52 - (exp + 24));
+            const auto full = (1ULL << 52) | mant;
+            auto half_mant = full >> shift;
+            const auto remainder = full & ((1ULL << shift) - 1);
+            const auto half_bit = 1ULL << (shift - 1);
+            if (remainder > half_bit || (remainder == half_bit && (half_mant & 1u) != 0))
+            {
+                ++half_mant;
+            }
+            if (half_mant > 0x3ffu)
+            {
+                // rounded up to the smallest normal half
+                return static_cast<std::uint16_t>((sign << 15) | (1u << 10));
+            }
+            return static_cast<std::uint16_t>((sign << 15) | static_cast<std::uint32_t>(half_mant & 0x3ffu));
+        }
+
+        // underflow to zero (with the sign preserved)
+        return static_cast<std::uint16_t>(sign << 15);
+    }
+
+    /*!
+    @brief convert an IEEE 754 half-precision (binary16) bit pattern to the
+           bit pattern of the double that represents it exactly
+    */
+    static std::uint64_t half_to_double_bits(const std::uint16_t h) noexcept
+    {
+        const auto sign = static_cast<std::uint64_t>((h >> 15) & 1u);
+        const auto half_exp = static_cast<std::uint64_t>((h >> 10) & 0x1fu);
+        const auto half_mant = static_cast<std::uint64_t>(h & 0x3ffu);
+
+        std::uint64_t double_exp{};
+        std::uint64_t double_mant{};
+
+        if (half_exp == 0)
+        {
+            if (half_mant == 0)
+            {
+                // zero
+                double_exp = 0;
+                double_mant = 0;
+            }
+            else
+            {
+                // subnormal half: normalize it
+                auto e = -14;
+                auto m = half_mant;
+                while ((m & 0x400u) == 0)
+                {
+                    m <<= 1;
+                    --e;
+                }
+                m &= 0x3ffu;
+                double_exp = static_cast<std::uint64_t>(e + 1023);
+                double_mant = m << 42;
+            }
+        }
+        else if (half_exp == 31)
+        {
+            // infinity or NaN
+            double_exp = 0x7ff;
+            double_mant = half_mant != 0 ? (0x8000000000000ULL | (half_mant << 42)) : 0;
+        }
+        else
+        {
+            // normal half
+            double_exp = half_exp - 15 + 1023;
+            double_mant = half_mant << 42;
+        }
+
+        return (sign << 63) | (double_exp << 52) | double_mant;
+    }
+
+    /*!
+    @brief write a floating-point number using the shortest format that can
+           represent it without loss
+
+    NaN is encoded uniformly as half-precision quiet NaN, and the sign of
+    `-0.0` is preserved.
+    */
+    void write_cbor_float_deterministic(const number_float_t n)
+    {
+        if (std::isnan(n))
+        {
+            // NaN: use a single, unified encoding (half-precision quiet NaN)
+            oa->write_character(to_char_type(0xF9));
+            oa->write_character(to_char_type(0x7E));
+            oa->write_character(to_char_type(0x00));
+        }
+        else if (std::isinf(n))
+        {
+            // infinity is 0xf97c00, -infinity is 0xf9fc00
+            oa->write_character(to_char_type(0xF9));
+            oa->write_character(n > 0 ? to_char_type(0x7C) : to_char_type(0xFC));
+            oa->write_character(to_char_type(0x00));
+        }
+        else
+        {
+            // finite: try half-precision first, then single-precision, then
+            // double-precision, keeping the sign of zero intact
+            const auto half = double_to_half(static_cast<double>(n));
+            if (half_to_double_bits(half) == double_to_bits(static_cast<double>(n)))
+            {
+                oa->write_character(to_char_type(0xF9));
+                write_number(half);
+            }
+            else if (static_cast<double>(static_cast<float>(n)) == static_cast<double>(n))
+            {
+                oa->write_character(to_char_type(0xFA));
+                write_number(static_cast<float>(n));
+            }
+            else
+            {
+                oa->write_character(to_char_type(0xFB));
+                write_number(n);
+            }
+        }
     }
 
     /////////////
@@ -24091,10 +24443,10 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
         const bool ignore_comments = false,
         const bool ignore_trailing_commas = false,
         const bool discard_number_values = false
-                                 )
+    )
     {
         return ::nlohmann::detail::parser<basic_json, InputAdapterType>(std::move(adapter),
-            std::move(cb), allow_exceptions, ignore_comments, ignore_trailing_commas, discard_number_values);
+               std::move(cb), allow_exceptions, ignore_comments, ignore_trailing_commas, discard_number_values);
     }
 
   private:
@@ -24858,8 +25210,8 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
                detail::enable_if_t <
                    !detail::is_basic_json<U>::value && detail::is_compatible_type<basic_json_t, U>::value, int > = 0 >
     basic_json(CompatibleType && val) noexcept(noexcept( // NOLINT(bugprone-forwarding-reference-overload,bugprone-exception-escape)
-            JSONSerializer<U>::to_json(std::declval<basic_json_t&>(),
-                                       std::forward<CompatibleType>(val))))
+                JSONSerializer<U>::to_json(std::declval<basic_json_t&>(),
+                                           std::forward<CompatibleType>(val))))
     {
         JSONSerializer<U>::to_json(*this, std::forward<CompatibleType>(val));
         set_parents();
@@ -25681,7 +26033,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
                    detail::has_from_json<basic_json_t, ValueType>::value,
                    int > = 0 >
     ValueType get_impl(detail::priority_tag<0> /*unused*/) const noexcept(noexcept(
-            JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>(), std::declval<ValueType&>())))
+                JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>(), std::declval<ValueType&>())))
     {
         auto ret = ValueType();
         JSONSerializer<ValueType>::from_json(*this, ret);
@@ -25723,7 +26075,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
                    detail::has_non_default_from_json<basic_json_t, ValueType>::value,
                    int > = 0 >
     ValueType get_impl(detail::priority_tag<1> /*unused*/) const noexcept(noexcept(
-            JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>())))
+                JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>())))
     {
         return JSONSerializer<ValueType>::from_json(*this);
     }
@@ -25873,7 +26225,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
                    detail::has_from_json<basic_json_t, ValueType>::value,
                    int > = 0 >
     ValueType & get_to(ValueType& v) const noexcept(noexcept(
-            JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>(), v)))
+                JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>(), v)))
     {
         JSONSerializer<ValueType>::from_json(*this, v);
         return v;
@@ -28379,6 +28731,29 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
     static void to_cbor(const basic_json& j, detail::output_adapter<char> o)
     {
         binary_writer<char>(o).write_cbor(j);
+    }
+
+    /// @brief create a deterministic CBOR serialization of a given JSON value
+    /// @sa https://json.nlohmann.me/api/basic_json/to_cbor_deterministic/
+    static std::vector<std::uint8_t> to_cbor_deterministic(const basic_json& j)
+    {
+        std::vector<std::uint8_t> result;
+        to_cbor_deterministic(j, result);
+        return result;
+    }
+
+    /// @brief create a deterministic CBOR serialization of a given JSON value
+    /// @sa https://json.nlohmann.me/api/basic_json/to_cbor_deterministic/
+    static void to_cbor_deterministic(const basic_json& j, detail::output_adapter<std::uint8_t> o)
+    {
+        binary_writer<std::uint8_t>(o).write_cbor_deterministic(j);
+    }
+
+    /// @brief create a deterministic CBOR serialization of a given JSON value
+    /// @sa https://json.nlohmann.me/api/basic_json/to_cbor_deterministic/
+    static void to_cbor_deterministic(const basic_json& j, detail::output_adapter<char> o)
+    {
+        binary_writer<char>(o).write_cbor_deterministic(j);
     }
 
     /// @brief create a MessagePack serialization of a given JSON value

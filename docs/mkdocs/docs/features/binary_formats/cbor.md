@@ -98,6 +98,23 @@ see "binary" cells in the table above.
 
     Binary subtypes will be serialized as tagged items. See [binary values](../binary_values.md#cbor) for an example.
 
+!!! info "Deterministic encoding"
+
+    The regular `to_cbor` serialization writes map entries in the order they are stored in the JSON value. For use
+    cases that require a fixed byte string for a given JSON value (e.g., as input to a signature or hash),
+    [`to_cbor_deterministic`](../../api/basic_json/to_cbor_deterministic.md) provides a deterministic variant:
+
+      - Map keys are sorted by the length of their encoded key data item (shorter first), then by bytewise
+        lexicographic order of the encoded key bytes. The sorting is performed on the encoded keys, not on the JSON
+        key strings, so it does not depend on the insertion order.
+      - Integers and lengths use the shortest legal encoding.
+      - Floating-point numbers use the shortest format that can represent the value without loss (half-precision,
+        then single-precision, then double-precision). NaN is encoded uniformly as half-precision quiet NaN, and the
+        sign of `-0.0` is preserved.
+      - The order of array elements is preserved.
+
+    The JSON value is only read; it is never modified.
+
 ??? example
 
     ```cpp

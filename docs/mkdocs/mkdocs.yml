@@ -215,6 +215,7 @@ nav:
           - 'to_bjdata': api/basic_json/to_bjdata.md
           - 'to_bson': api/basic_json/to_bson.md
           - 'to_cbor': api/basic_json/to_cbor.md
+          - 'to_cbor_deterministic': api/basic_json/to_cbor_deterministic.md
           - 'to_msgpack': api/basic_json/to_msgpack.md
           - 'to_string': api/basic_json/to_string.md
           - 'to_ubjson': api/basic_json/to_ubjson.md
