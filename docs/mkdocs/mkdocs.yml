@@ -209,6 +209,7 @@ nav:
           - 'sax_parse': api/basic_json/sax_parse.md
           - 'size': api/basic_json/size.md
           - 'start_pos': api/basic_json/start_pos.md
+          - 'structural_compare': api/basic_json/structural_compare.md
           - 'string_t': api/basic_json/string_t.md
           - 'swap': api/basic_json/swap.md
           - 'std::swap&lt;basic_json&gt;': api/basic_json/std_swap.md

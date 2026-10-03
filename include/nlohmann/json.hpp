@@ -5395,10 +5395,348 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
     }
     /// @}
 
+    ///////////////////////////////////////
+    // read-only structural comparison   //
+    ///////////////////////////////////////
+
+    /// @name read-only structural comparison
+    /// @{
+
+    /// @brief result of a read-only structural comparison
+    /// @sa https://json.nlohmann.me/api/basic_json/structural_compare/
+    struct structural_compare_result
+    {
+        /// whether the two values are equal
+        bool equal = true;
+        /// pointer to the first difference (valid only if equal is false)
+        json_pointer first_difference;
+    };
+
+    /// @brief read-only structural comparison
+    /// @sa https://json.nlohmann.me/api/basic_json/structural_compare/
+    JSON_HEDLEY_WARN_UNUSED_RESULT
+    static structural_compare_result structural_compare(const_reference lhs, const_reference rhs)
+    {
+        structural_compare_result result;
+        structural_compare_impl(lhs, rhs, json_pointer{}, result);
+        return result;
+    }
+
+    /// @}
+
+  private:
+    static void structural_compare_impl(const_reference lhs, const_reference rhs,
+                                        const json_pointer& path,
+                                        structural_compare_result& result)
+    {
+        if (!result.equal)
+        {
+            return;
+        }
+
+        const auto lhs_type = lhs.type();
+        const auto rhs_type = rhs.type();
+
+        // number types are compatible with each other
+        const bool lhs_is_number = lhs.is_number();
+        const bool rhs_is_number = rhs.is_number();
+
+        if (lhs_type != rhs_type && !(lhs_is_number && rhs_is_number))
+        {
+            result.equal = false;
+            result.first_difference = path;
+            return;
+        }
+
+        switch (lhs_type)
+        {
+            case value_t::null:
+            {
+                // both null, equal
+                return;
+            }
+
+            case value_t::boolean:
+            {
+                if (lhs.m_data.m_value.boolean != rhs.m_data.m_value.boolean)
+                {
+                    result.equal = false;
+                    result.first_difference = path;
+                }
+                return;
+            }
+
+            case value_t::string:
+            {
+                if (*lhs.m_data.m_value.string != *rhs.m_data.m_value.string)
+                {
+                    result.equal = false;
+                    result.first_difference = path;
+                }
+                return;
+            }
+
+            case value_t::number_integer:
+            case value_t::number_unsigned:
+            case value_t::number_float:
+            {
+                structural_compare_numbers(lhs, rhs, path, result);
+                return;
+            }
+
+            case value_t::array:
+            {
+                const auto& lhs_array = *lhs.m_data.m_value.array;
+                const auto& rhs_array = *rhs.m_data.m_value.array;
+
+                if (lhs_array.size() != rhs_array.size())
+                {
+                    result.equal = false;
+                    result.first_difference = path;
+                    return;
+                }
+
+                for (std::size_t i = 0; i < lhs_array.size(); ++i)
+                {
+                    const json_pointer child_path = path / i;
+                    structural_compare_impl(lhs_array[i], rhs_array[i], child_path, result);
+                    if (!result.equal)
+                    {
+                        return;
+                    }
+                }
+                return;
+            }
+
+            case value_t::object:
+            {
+                const auto& lhs_object = *lhs.m_data.m_value.object;
+                const auto& rhs_object = *rhs.m_data.m_value.object;
+
+                // compare keys present in lhs
+                for (const auto& kv : lhs_object)
+                {
+                    const auto it = rhs_object.find(kv.first);
+                    if (it == rhs_object.end())
+                    {
+                        result.equal = false;
+                        result.first_difference = path / kv.first;
+                        return;
+                    }
+                    const json_pointer child_path = path / kv.first;
+                    structural_compare_impl(kv.second, it->second, child_path, result);
+                    if (!result.equal)
+                    {
+                        return;
+                    }
+                }
+
+                // check for keys missing in lhs
+                for (const auto& kv : rhs_object)
+                {
+                    const auto it = lhs_object.find(kv.first);
+                    if (it == lhs_object.end())
+                    {
+                        result.equal = false;
+                        result.first_difference = path / kv.first;
+                        return;
+                    }
+                }
+                return;
+            }
+
+            case value_t::binary:
+            {
+                if (*lhs.m_data.m_value.binary != *rhs.m_data.m_value.binary)
+                {
+                    result.equal = false;
+                    result.first_difference = path;
+                }
+                return;
+            }
+
+            case value_t::discarded:
+            default:
+            {
+                result.equal = false;
+                result.first_difference = path;
+                return;
+            }
+        }
+    }
+
+    static void structural_compare_numbers(const_reference lhs, const_reference rhs,
+                                           const json_pointer& path,
+                                           structural_compare_result& result)
+    {
+        const auto lhs_type = lhs.type();
+        const auto rhs_type = rhs.type();
+
+        if (lhs_type == rhs_type)
+        {
+            switch (lhs_type)
+            {
+                case value_t::number_integer:
+                {
+                    if (lhs.m_data.m_value.number_integer != rhs.m_data.m_value.number_integer)
+                    {
+                        result.equal = false;
+                        result.first_difference = path;
+                    }
+                    return;
+                }
+
+                case value_t::number_unsigned:
+                {
+                    if (lhs.m_data.m_value.number_unsigned != rhs.m_data.m_value.number_unsigned)
+                    {
+                        result.equal = false;
+                        result.first_difference = path;
+                    }
+                    return;
+                }
+
+                case value_t::number_float:
+                {
+                    const auto lhs_f = lhs.m_data.m_value.number_float;
+                    const auto rhs_f = rhs.m_data.m_value.number_float;
+
+                    if (std::isnan(lhs_f) || std::isnan(rhs_f))
+                    {
+                        JSON_THROW(type_error::create(318, "NaN is not allowed in structural comparison", &lhs));
+                    }
+                    if (std::isinf(lhs_f) || std::isinf(rhs_f))
+                    {
+                        JSON_THROW(type_error::create(318, "infinity is not allowed in structural comparison", &lhs));
+                    }
+
+                    if (lhs_f != rhs_f)
+                    {
+                        result.equal = false;
+                        result.first_difference = path;
+                    }
+                    return;
+                }
+
+                default:
+                    return;
+            }
+        }
+
+        // different number types
+        // integer vs unsigned
+        if (lhs_type == value_t::number_integer && rhs_type == value_t::number_unsigned)
+        {
+            const auto lhs_i = lhs.m_data.m_value.number_integer;
+            const auto rhs_u = rhs.m_data.m_value.number_unsigned;
+            if (lhs_i < 0 || static_cast<number_unsigned_t>(lhs_i) != rhs_u)
+            {
+                result.equal = false;
+                result.first_difference = path;
+            }
+            return;
+        }
+
+        if (lhs_type == value_t::number_unsigned && rhs_type == value_t::number_integer)
+        {
+            const auto lhs_u = lhs.m_data.m_value.number_unsigned;
+            const auto rhs_i = rhs.m_data.m_value.number_integer;
+            if (rhs_i < 0 || lhs_u != static_cast<number_unsigned_t>(rhs_i))
+            {
+                result.equal = false;
+                result.first_difference = path;
+            }
+            return;
+        }
+
+        // integer vs float
+        if (lhs_type == value_t::number_integer && rhs_type == value_t::number_float)
+        {
+            const auto lhs_i = lhs.m_data.m_value.number_integer;
+            const auto rhs_f = rhs.m_data.m_value.number_float;
+            if (std::isnan(rhs_f))
+            {
+                JSON_THROW(type_error::create(318, "NaN is not allowed in structural comparison", &rhs));
+            }
+            if (std::isinf(rhs_f))
+            {
+                JSON_THROW(type_error::create(318, "infinity is not allowed in structural comparison", &rhs));
+            }
+            if (detail::compare_integer_with_float(lhs_i, rhs_f) != static_cast<number_float_t>(0))
+            {
+                result.equal = false;
+                result.first_difference = path;
+            }
+            return;
+        }
+
+        if (lhs_type == value_t::number_float && rhs_type == value_t::number_integer)
+        {
+            const auto lhs_f = lhs.m_data.m_value.number_float;
+            const auto rhs_i = rhs.m_data.m_value.number_integer;
+            if (std::isnan(lhs_f))
+            {
+                JSON_THROW(type_error::create(318, "NaN is not allowed in structural comparison", &lhs));
+            }
+            if (std::isinf(lhs_f))
+            {
+                JSON_THROW(type_error::create(318, "infinity is not allowed in structural comparison", &lhs));
+            }
+            if (detail::compare_integer_with_float(rhs_i, lhs_f) != static_cast<number_float_t>(0))
+            {
+                result.equal = false;
+                result.first_difference = path;
+            }
+            return;
+        }
+
+        // unsigned vs float
+        if (lhs_type == value_t::number_unsigned && rhs_type == value_t::number_float)
+        {
+            const auto lhs_u = lhs.m_data.m_value.number_unsigned;
+            const auto rhs_f = rhs.m_data.m_value.number_float;
+            if (std::isnan(rhs_f))
+            {
+                JSON_THROW(type_error::create(318, "NaN is not allowed in structural comparison", &rhs));
+            }
+            if (std::isinf(rhs_f))
+            {
+                JSON_THROW(type_error::create(318, "infinity is not allowed in structural comparison", &rhs));
+            }
+            if (detail::compare_integer_with_float(lhs_u, rhs_f) != static_cast<number_float_t>(0))
+            {
+                result.equal = false;
+                result.first_difference = path;
+            }
+            return;
+        }
+
+        if (lhs_type == value_t::number_float && rhs_type == value_t::number_unsigned)
+        {
+            const auto lhs_f = lhs.m_data.m_value.number_float;
+            const auto rhs_u = rhs.m_data.m_value.number_unsigned;
+            if (std::isnan(lhs_f))
+            {
+                JSON_THROW(type_error::create(318, "NaN is not allowed in structural comparison", &lhs));
+            }
+            if (std::isinf(lhs_f))
+            {
+                JSON_THROW(type_error::create(318, "infinity is not allowed in structural comparison", &lhs));
+            }
+            if (detail::compare_integer_with_float(rhs_u, lhs_f) != static_cast<number_float_t>(0))
+            {
+                result.equal = false;
+                result.first_difference = path;
+            }
+            return;
+        }
+    }
+
     ////////////////////////////////
     // JSON Merge Patch functions //
     ////////////////////////////////
 
+  public:
     /// @name JSON Merge Patch functions
     /// @{
 

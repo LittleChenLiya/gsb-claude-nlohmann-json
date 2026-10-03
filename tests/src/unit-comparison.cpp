@@ -735,3 +735,128 @@ TEST_CASE("regression #3868 - heterogeneous comparisons compile under C++20 (P24
     }
 }
 #endif
+
+TEST_CASE("structural_compare - read-only structural comparison")
+{
+    SECTION("large integers beyond 2^53 must not become equal")
+    {
+        json a = 9007199254740992;
+        json b = 9007199254740993;
+        const auto res = json::structural_compare(a, b);
+        CHECK_FALSE(res.equal);
+    }
+
+    SECTION("integer 1 and float 1.0 are equal")
+    {
+        json a = 1;
+        json b = 1.0;
+        const auto res = json::structural_compare(a, b);
+        CHECK(res.equal);
+    }
+
+    SECTION("string \"1\" is not equal to integer 1")
+    {
+        json a = 1;
+        json b = "1";
+        const auto res = json::structural_compare(a, b);
+        CHECK_FALSE(res.equal);
+    }
+
+    SECTION("nested differences give accurately escaped pointer")
+    {
+        json a = {{"a/b", 1}, {"c~d", 2}, {"normal", 3}};
+        json b = {{"a/b", 1}, {"c~d", 5}, {"normal", 3}};
+        const auto res = json::structural_compare(a, b);
+        CHECK_FALSE(res.equal);
+        CHECK(res.first_difference.to_string() == "/c~0d");
+    }
+
+    SECTION("negative integer and large unsigned must not overflow")
+    {
+        json a = -1;
+        json b = 18446744073709551615ULL;
+        const auto res = json::structural_compare(a, b);
+        CHECK_FALSE(res.equal);
+    }
+
+    SECTION("-0.0 is equal to 0.0")
+    {
+        json a = -0.0;
+        json b = 0.0;
+        const auto res = json::structural_compare(a, b);
+        CHECK(res.equal);
+    }
+
+    SECTION("NaN is rejected")
+    {
+        json a = std::numeric_limits<double>::quiet_NaN();
+        json b = 1.0;
+        CHECK_THROWS_AS(json::structural_compare(a, b), json::type_error);
+    }
+
+    SECTION("infinity is rejected")
+    {
+        json a = std::numeric_limits<double>::infinity();
+        json b = 1.0;
+        CHECK_THROWS_AS(json::structural_compare(a, b), json::type_error);
+    }
+
+    SECTION("array order is preserved")
+    {
+        json a = {1, 2, 3};
+        json b = {1, 2, 3};
+        CHECK(json::structural_compare(a, b).equal);
+
+        json c = {1, 2, 3};
+        json d = {1, 3, 2};
+        const auto res = json::structural_compare(c, d);
+        CHECK_FALSE(res.equal);
+        CHECK(res.first_difference.to_string() == "/1");
+    }
+
+    SECTION("object key order does not affect result")
+    {
+        json a = {{"b", 2}, {"a", 1}};
+        json b = {{"a", 1}, {"b", 2}};
+        CHECK(json::structural_compare(a, b).equal);
+    }
+
+    SECTION("comparison does not modify inputs")
+    {
+        json a = {{"a", 1}};
+        json b = {{"a", 2}};
+        const json a_copy = a;
+        const json b_copy = b;
+        const auto res = json::structural_compare(a, b);
+        CHECK_FALSE(res.equal);
+        CHECK(a == a_copy);
+        CHECK(b == b_copy);
+    }
+
+    SECTION("identical values are equal with empty pointer")
+    {
+        json a = {{"a", {1, 2, {3, 4}}}, "b"};
+        json b = {{"a", {1, 2, {3, 4}}}, "b"};
+        const auto res = json::structural_compare(a, b);
+        CHECK(res.equal);
+        CHECK(res.first_difference.to_string().empty());
+    }
+
+    SECTION("missing key in object gives pointer to missing key")
+    {
+        json a = {{"a", 1}, {"b", 2}};
+        json b = {{"a", 1}};
+        const auto res = json::structural_compare(a, b);
+        CHECK_FALSE(res.equal);
+        CHECK(res.first_difference.to_string() == "/b");
+    }
+
+    SECTION("array length difference gives empty pointer")
+    {
+        json a = {1, 2, 3};
+        json b = {1, 2};
+        const auto res = json::structural_compare(a, b);
+        CHECK_FALSE(res.equal);
+        CHECK(res.first_difference.to_string().empty());
+    }
+}
