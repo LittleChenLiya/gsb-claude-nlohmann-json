@@ -238,6 +238,30 @@ class json_pointer
         return reference_tokens.empty();
     }
 
+    /// @brief return whether this pointer is a decoded-token-level prefix of another pointer
+    /// @param other the pointer to check against
+    /// @return true if every token of this pointer matches the corresponding token of @a other
+    ///
+    /// This comparison is based on decoded reference tokens, not string prefixes.
+    /// For example, /a is a prefix of /a/0 but not of /a2.
+    bool is_prefix_of(const json_pointer& other) const
+    {
+        if (reference_tokens.size() > other.reference_tokens.size())
+        {
+            return false;
+        }
+
+        for (std::size_t i = 0; i < reference_tokens.size(); ++i)
+        {
+            if (reference_tokens[i] != other.reference_tokens[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
   private:
     /*!
     @param[in] s  reference token to be converted into an array index
