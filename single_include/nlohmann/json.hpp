@@ -3824,71 +3824,71 @@ NLOHMANN_JSON_NAMESPACE_END
 // SPDX-License-Identifier: MIT
 
 #ifndef INCLUDE_NLOHMANN_JSON_FWD_HPP_
-    #define INCLUDE_NLOHMANN_JSON_FWD_HPP_
+#define INCLUDE_NLOHMANN_JSON_FWD_HPP_
 
-    #include <cstdint> // int64_t, uint64_t
-    #include <map> // map
-    #include <memory> // allocator
-    #include <string> // string
-    #include <vector> // vector
+#include <cstdint> // int64_t, uint64_t
+#include <map> // map
+#include <memory> // allocator
+#include <string> // string
+#include <vector> // vector
 
-    // #include <nlohmann/detail/abi_macros.hpp>
+// #include <nlohmann/detail/abi_macros.hpp>
 
 
-    /*!
-    @brief namespace for Niels Lohmann
-    @see https://github.com/nlohmann
-    @since version 1.0.0
-    */
-    NLOHMANN_JSON_NAMESPACE_BEGIN
+/*!
+@brief namespace for Niels Lohmann
+@see https://github.com/nlohmann
+@since version 1.0.0
+*/
+NLOHMANN_JSON_NAMESPACE_BEGIN
 
-    /*!
-    @brief default JSONSerializer template argument
+/*!
+@brief default JSONSerializer template argument
 
-    This serializer ignores the template arguments and uses ADL
-    ([argument-dependent lookup](https://en.cppreference.com/w/cpp/language/adl))
-    for serialization.
-    */
-    template<typename T = void, typename SFINAE = void>
-    struct adl_serializer;
+This serializer ignores the template arguments and uses ADL
+([argument-dependent lookup](https://en.cppreference.com/w/cpp/language/adl))
+for serialization.
+*/
+template<typename T = void, typename SFINAE = void>
+struct adl_serializer;
 
-    /// a class to store JSON values
-    /// @sa https://json.nlohmann.me/api/basic_json/
-    template<template<typename U, typename V, typename... Args> class ObjectType =
-    std::map,
-    template<typename U, typename... Args> class ArrayType = std::vector,
-    class StringType = std::string, class BooleanType = bool,
-    class NumberIntegerType = std::int64_t,
-    class NumberUnsignedType = std::uint64_t,
-    class NumberFloatType = double,
-    template<typename U> class AllocatorType = std::allocator,
-    template<typename T, typename SFINAE = void> class JSONSerializer =
-    adl_serializer,
-    class BinaryType = std::vector<std::uint8_t>, // cppcheck-suppress syntaxError
-    class CustomBaseClass = void>
-    class basic_json;
+/// a class to store JSON values
+/// @sa https://json.nlohmann.me/api/basic_json/
+template<template<typename U, typename V, typename... Args> class ObjectType =
+         std::map,
+         template<typename U, typename... Args> class ArrayType = std::vector,
+         class StringType = std::string, class BooleanType = bool,
+         class NumberIntegerType = std::int64_t,
+         class NumberUnsignedType = std::uint64_t,
+         class NumberFloatType = double,
+         template<typename U> class AllocatorType = std::allocator,
+         template<typename T, typename SFINAE = void> class JSONSerializer =
+         adl_serializer,
+         class BinaryType = std::vector<std::uint8_t>, // cppcheck-suppress syntaxError
+         class CustomBaseClass = void>
+class basic_json;
 
-    /// @brief JSON Pointer defines a string syntax for identifying a specific value within a JSON document
-    /// @sa https://json.nlohmann.me/api/json_pointer/
-    template<typename RefStringType>
-    class json_pointer;
+/// @brief JSON Pointer defines a string syntax for identifying a specific value within a JSON document
+/// @sa https://json.nlohmann.me/api/json_pointer/
+template<typename RefStringType>
+class json_pointer;
 
-    /*!
-    @brief default specialization
-    @sa https://json.nlohmann.me/api/json/
-    */
-    using json = basic_json<>;
+/*!
+@brief default specialization
+@sa https://json.nlohmann.me/api/json/
+*/
+using json = basic_json<>;
 
-    /// @brief a minimal map-like container that preserves insertion order
-    /// @sa https://json.nlohmann.me/api/ordered_map/
-    template<class Key, class T, class IgnoredLess, class Allocator>
-    struct ordered_map;
+/// @brief a minimal map-like container that preserves insertion order
+/// @sa https://json.nlohmann.me/api/ordered_map/
+template<class Key, class T, class IgnoredLess, class Allocator>
+struct ordered_map;
 
-    /// @brief specialization that maintains the insertion order of object keys
-    /// @sa https://json.nlohmann.me/api/ordered_json/
-    using ordered_json = basic_json<nlohmann::ordered_map>;
+/// @brief specialization that maintains the insertion order of object keys
+/// @sa https://json.nlohmann.me/api/ordered_json/
+using ordered_json = basic_json<nlohmann::ordered_map>;
 
-    NLOHMANN_JSON_NAMESPACE_END
+NLOHMANN_JSON_NAMESPACE_END
 
 #endif  // INCLUDE_NLOHMANN_JSON_FWD_HPP_
 
@@ -6007,7 +6007,7 @@ NLOHMANN_JSON_NAMESPACE_END
 
 
 // #include <nlohmann/detail/macro_scope.hpp>
-// JSON_HAS_CPP_17
+ // JSON_HAS_CPP_17
 #ifdef JSON_HAS_CPP_17
     #include <optional> // optional
 #endif
@@ -17302,6 +17302,9 @@ class json_pointer
     friend class basic_json;
 
     template<typename>
+    friend class json_patch_preflight;
+
+    template<typename>
     friend class json_pointer;
 
     template<typename T>
@@ -18425,6 +18428,580 @@ inline bool operator<(const json_pointer<RefStringTypeLhs>& lhs,
     return lhs.reference_tokens < rhs.reference_tokens;
 }
 #endif
+
+NLOHMANN_JSON_NAMESPACE_END
+
+// #include <nlohmann/detail/json_patch_preflight.hpp>
+//     __ _____ _____ _____
+//  __|  |   __|     |   | |  JSON for Modern C++ (supporting code)
+// |  |  |__   |  |  | | | |  version 3.12.0
+// |_____|_____|_____|_|___|  https://github.com/nlohmann/json
+//
+// SPDX-FileCopyrightText: 2013-2026 Niels Lohmann <https://nlohmann.me>
+// SPDX-License-Identifier: MIT
+
+
+
+#include <cstddef> // size_t
+#include <exception> // exception
+#include <string> // string
+#include <vector> // vector
+
+// #include <nlohmann/detail/exceptions.hpp>
+
+// #include <nlohmann/detail/json_pointer.hpp>
+
+// #include <nlohmann/detail/macro_scope.hpp>
+
+// #include <nlohmann/detail/string_concat.hpp>
+
+// #include <nlohmann/detail/value_t.hpp>
+
+
+NLOHMANN_JSON_NAMESPACE_BEGIN
+
+/// @brief status of a single JSON Patch operation during preflight
+/// @sa https://json.nlohmann.me/api/basic_json/preflight_patch/
+enum class json_patch_preflight_status
+{
+    ok,      ///< the operation can be applied to the document
+    failed,  ///< the operation cannot be applied; see @a message for the reason
+    blocked  ///< the operation was not checked because an earlier operation failed
+};
+
+/// @brief report for a single JSON Patch operation
+/// @sa https://json.nlohmann.me/api/basic_json/preflight_patch/
+struct json_patch_preflight_operation
+{
+    /// @brief index of the operation in the patch array
+    std::size_t index = 0;
+
+    /// @brief operation name ("add", "remove", "replace", "move", "copy", "test")
+    std::string op;
+
+    /// @brief JSON Pointer from the operation's "path" member
+    std::string path;
+
+    /// @brief JSON Pointer from the operation's "from" member (empty if absent)
+    std::string from;
+
+    /// @brief status of the operation
+    json_patch_preflight_status status = json_patch_preflight_status::ok;
+
+    /// @brief human-readable diagnostic message (empty if status is ok)
+    std::string message;
+};
+
+/// @brief report of preflighting a JSON Patch
+/// @sa https://json.nlohmann.me/api/basic_json/preflight_patch/
+struct json_patch_preflight_report
+{
+    /// @brief reports for each operation in the patch, in order
+    std::vector<json_patch_preflight_operation> operations;
+
+    /// @return true if every operation would succeed
+    bool ok() const noexcept
+    {
+        for (const auto& op : operations)
+        {
+            if (op.status != json_patch_preflight_status::ok)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+template<typename BasicJsonType>
+class json_patch_preflight
+{
+  public:
+    using report_type = json_patch_preflight_report;
+    using operation_report_type = json_patch_preflight_operation;
+    using string_t = typename BasicJsonType::string_t;
+    using json_pointer_t = json_pointer<string_t>;
+
+    static report_type check(const BasicJsonType& doc, const BasicJsonType& json_patch)
+    {
+        report_type report;
+        BasicJsonType working = doc;
+        bool blocked = false;
+
+        enum class patch_operations { add, remove, replace, move, copy, test, invalid };
+
+        const auto get_op = [](const string_t& op) -> patch_operations
+        {
+            if (op == "add") { return patch_operations::add; }
+            if (op == "remove") { return patch_operations::remove; }
+            if (op == "replace") { return patch_operations::replace; }
+            if (op == "move") { return patch_operations::move; }
+            if (op == "copy") { return patch_operations::copy; }
+            if (op == "test") { return patch_operations::test; }
+            return patch_operations::invalid;
+        };
+
+        if (JSON_HEDLEY_UNLIKELY(!json_patch.is_array()))
+        {
+            operation_report_type op_report;
+            op_report.index = 0;
+            op_report.status = json_patch_preflight_status::failed;
+            op_report.message = "JSON patch must be an array of objects";
+            report.operations.push_back(op_report);
+            return report;
+        }
+
+        for (std::size_t i = 0; i < json_patch.size(); ++i)
+        {
+            const auto& val = json_patch[i];
+            operation_report_type op_report;
+            op_report.index = i;
+
+            if (blocked)
+            {
+                op_report.status = json_patch_preflight_status::blocked;
+                if (val.is_object())
+                {
+                    auto op_it = val.find("op");
+                    if (op_it != val.end() && op_it->is_string())
+                    {
+                        op_report.op = op_it->template get<string_t>();
+                    }
+                    auto path_it = val.find("path");
+                    if (path_it != val.end() && path_it->is_string())
+                    {
+                        op_report.path = path_it->template get<string_t>();
+                    }
+                    auto from_it = val.find("from");
+                    if (from_it != val.end() && from_it->is_string())
+                    {
+                        op_report.from = from_it->template get<string_t>();
+                    }
+                }
+                report.operations.push_back(op_report);
+                continue;
+            }
+
+            if (JSON_HEDLEY_UNLIKELY(!val.is_object()))
+            {
+                op_report.status = json_patch_preflight_status::failed;
+                op_report.message = "JSON patch must be an array of objects";
+                report.operations.push_back(op_report);
+                blocked = true;
+                continue;
+            }
+
+            string_t op;
+            try
+            {
+                auto op_it = val.find("op");
+                if (op_it == val.end())
+                {
+                    op_report.status = json_patch_preflight_status::failed;
+                    op_report.message = "operation must have member 'op'";
+                    report.operations.push_back(op_report);
+                    blocked = true;
+                    continue;
+                }
+                if (JSON_HEDLEY_UNLIKELY(!op_it->is_string()))
+                {
+                    op_report.status = json_patch_preflight_status::failed;
+                    op_report.message = "operation must have string member 'op'";
+                    report.operations.push_back(op_report);
+                    blocked = true;
+                    continue;
+                }
+                op = op_it->template get<string_t>();
+                op_report.op = op;
+            }
+            catch (...)
+            {
+                op_report.status = json_patch_preflight_status::failed;
+                op_report.message = "operation must have member 'op'";
+                report.operations.push_back(op_report);
+                blocked = true;
+                continue;
+            }
+
+            string_t path;
+            try
+            {
+                auto path_it = val.find("path");
+                if (path_it == val.end())
+                {
+                    op_report.status = json_patch_preflight_status::failed;
+                    op_report.message = detail::concat("operation '", op, "' must have member 'path'");
+                    report.operations.push_back(op_report);
+                    blocked = true;
+                    continue;
+                }
+                if (JSON_HEDLEY_UNLIKELY(!path_it->is_string()))
+                {
+                    op_report.status = json_patch_preflight_status::failed;
+                    op_report.message = detail::concat("operation '", op, "' must have string member 'path'");
+                    report.operations.push_back(op_report);
+                    blocked = true;
+                    continue;
+                }
+                path = path_it->template get<string_t>();
+                op_report.path = path;
+            }
+            catch (...)
+            {
+                op_report.status = json_patch_preflight_status::failed;
+                op_report.message = detail::concat("operation '", op, "' must have member 'path'");
+                report.operations.push_back(op_report);
+                blocked = true;
+                continue;
+            }
+
+            json_pointer_t ptr;
+            try
+            {
+                ptr = json_pointer_t(path);
+            }
+            catch (const std::exception& e)
+            {
+                op_report.status = json_patch_preflight_status::failed;
+                op_report.message = detail::concat("operation '", op, "' has invalid 'path' pointer: ", e.what());
+                report.operations.push_back(op_report);
+                blocked = true;
+                continue;
+            }
+            catch (...)
+            {
+                op_report.status = json_patch_preflight_status::failed;
+                op_report.message = detail::concat("operation '", op, "' has invalid 'path' pointer");
+                report.operations.push_back(op_report);
+                blocked = true;
+                continue;
+            }
+
+            bool op_ok = false;
+            string_t op_message;
+
+            try
+            {
+                switch (get_op(op))
+                {
+                    case patch_operations::add:
+                    {
+                        auto value_it = val.find("value");
+                        if (value_it == val.end())
+                        {
+                            op_message = detail::concat("operation '", op, "' must have member 'value'");
+                            break;
+                        }
+                        operation_add(working, ptr, *value_it);
+                        op_ok = true;
+                        break;
+                    }
+
+                    case patch_operations::remove:
+                    {
+                        operation_remove(working, ptr);
+                        op_ok = true;
+                        break;
+                    }
+
+                    case patch_operations::replace:
+                    {
+                        auto value_it = val.find("value");
+                        if (value_it == val.end())
+                        {
+                            op_message = detail::concat("operation '", op, "' must have member 'value'");
+                            break;
+                        }
+                        working.at(ptr) = *value_it;
+                        op_ok = true;
+                        break;
+                    }
+
+                    case patch_operations::move:
+                    {
+                        auto from_it = val.find("from");
+                        if (from_it == val.end())
+                        {
+                            op_message = detail::concat("operation '", op, "' must have member 'from'");
+                            break;
+                        }
+                        if (JSON_HEDLEY_UNLIKELY(!from_it->is_string()))
+                        {
+                            op_message = detail::concat("operation '", op, "' must have string member 'from'");
+                            break;
+                        }
+                        string_t from_path = from_it->template get<string_t>();
+                        op_report.from = from_path;
+
+                        json_pointer_t from_ptr;
+                        try
+                        {
+                            from_ptr = json_pointer_t(from_path);
+                        }
+                        catch (const std::exception& e)
+                        {
+                            op_message = detail::concat("operation '", op, "' has invalid 'from' pointer: ", e.what());
+                            break;
+                        }
+
+                        BasicJsonType v;
+                        try
+                        {
+                            v = working.at(from_ptr);
+                        }
+                        catch (const std::exception& e)
+                        {
+                            op_message = detail::concat("operation '", op, "' from path '", from_path, "': ", e.what());
+                            break;
+                        }
+
+                        if (JSON_HEDLEY_UNLIKELY(is_proper_prefix(from_ptr, ptr)))
+                        {
+                            op_message = detail::concat("cannot move value: 'from' path '", from_path, "' is a proper prefix of 'path' '", path, "'");
+                            break;
+                        }
+
+                        try
+                        {
+                            operation_remove(working, from_ptr);
+                            operation_add(working, ptr, v);
+                        }
+                        catch (const std::exception& e)
+                        {
+                            op_message = detail::concat("operation '", op, "' path '", path, "': ", e.what());
+                            break;
+                        }
+                        op_ok = true;
+                        break;
+                    }
+
+                    case patch_operations::copy:
+                    {
+                        auto from_it = val.find("from");
+                        if (from_it == val.end())
+                        {
+                            op_message = detail::concat("operation '", op, "' must have member 'from'");
+                            break;
+                        }
+                        if (JSON_HEDLEY_UNLIKELY(!from_it->is_string()))
+                        {
+                            op_message = detail::concat("operation '", op, "' must have string member 'from'");
+                            break;
+                        }
+                        string_t from_path = from_it->template get<string_t>();
+                        op_report.from = from_path;
+
+                        json_pointer_t from_ptr;
+                        try
+                        {
+                            from_ptr = json_pointer_t(from_path);
+                        }
+                        catch (const std::exception& e)
+                        {
+                            op_message = detail::concat("operation '", op, "' has invalid 'from' pointer: ", e.what());
+                            break;
+                        }
+
+                        BasicJsonType v;
+                        try
+                        {
+                            v = working.at(from_ptr);
+                        }
+                        catch (const std::exception& e)
+                        {
+                            op_message = detail::concat("operation '", op, "' from path '", from_path, "': ", e.what());
+                            break;
+                        }
+                        operation_add(working, ptr, v);
+                        op_ok = true;
+                        break;
+                    }
+
+                    case patch_operations::test:
+                    {
+                        auto value_it = val.find("value");
+                        if (value_it == val.end())
+                        {
+                            op_message = detail::concat("operation '", op, "' must have member 'value'");
+                            break;
+                        }
+                        bool success = false;
+                        JSON_TRY
+                        {
+                            success = (working.at(ptr) == *value_it);
+                        }
+                        JSON_INTERNAL_CATCH (const std::exception&)
+                        {
+                            success = false;
+                        }
+
+                        if (JSON_HEDLEY_UNLIKELY(!success))
+                        {
+                            op_message = detail::concat("unsuccessful: ", val.dump());
+                            break;
+                        }
+                        op_ok = true;
+                        break;
+                    }
+
+                    case patch_operations::invalid:
+                    default:
+                    {
+                        op_message = detail::concat("operation value '", op, "' is invalid");
+                        break;
+                    }
+                }
+            }
+            catch (const std::exception& e)
+            {
+                op_message = e.what();
+            }
+            catch (...)
+            {
+                op_message = "unknown error";
+            }
+
+            if (op_ok)
+            {
+                op_report.status = json_patch_preflight_status::ok;
+            }
+            else
+            {
+                op_report.status = json_patch_preflight_status::failed;
+                op_report.message = op_message;
+                blocked = true;
+            }
+            report.operations.push_back(op_report);
+        }
+
+        return report;
+    }
+
+  private:
+    // wrapper for "add" operation; add value at ptr
+    static void operation_add(BasicJsonType& result, json_pointer_t& ptr, const BasicJsonType& val)
+    {
+        // adding to the root of the target document means replacing it
+        if (ptr.empty())
+        {
+            result = val;
+            return;
+        }
+
+        // make sure the top element of the pointer exists
+        json_pointer_t const top_pointer = ptr.top();
+        if (top_pointer != ptr)
+        {
+            result.at(top_pointer);
+        }
+
+        // get reference to the parent of the JSON pointer ptr
+        const auto last_path = ptr.back();
+        ptr.pop_back();
+        // parent must exist when performing patch add per RFC6902 specs
+        BasicJsonType& parent = result.at(ptr);
+
+        switch (parent.m_data.m_type)
+        {
+            case detail::value_t::null:
+            case detail::value_t::object:
+            {
+                // use operator[] to add value
+                parent[last_path] = val;
+                break;
+            }
+
+            case detail::value_t::array:
+            {
+                if (last_path == "-")
+                {
+                    // special case: append to back
+                    parent.push_back(val);
+                }
+                else
+                {
+                    const auto idx = json_pointer_t::template array_index<BasicJsonType>(last_path);
+                    if (JSON_HEDLEY_UNLIKELY(idx > parent.size()))
+                    {
+                        // avoid undefined behavior
+                        JSON_THROW(detail::out_of_range::create(401, detail::concat("array index ", std::to_string(idx), " is out of range"), &parent));
+                    }
+
+                    // default case: insert add offset
+                    parent.insert(parent.begin() + static_cast<typename BasicJsonType::difference_type>(idx), val);
+                }
+                break;
+            }
+
+            // the parent of an "add" target must be an object or array
+            // (see #4292)
+            case detail::value_t::string:
+            case detail::value_t::boolean:
+            case detail::value_t::number_integer:
+            case detail::value_t::number_unsigned:
+            case detail::value_t::number_float:
+            case detail::value_t::binary:
+            case detail::value_t::discarded:
+            default:
+                JSON_THROW(detail::out_of_range::create(411, detail::concat("cannot add value: the JSON Patch 'add' target's parent is of type ", parent.type_name(), ", but must be an object or array"), &parent));
+        }
+    }
+
+    // wrapper for "remove" operation; remove value at ptr
+    static void operation_remove(BasicJsonType& result, json_pointer_t& ptr)
+    {
+        // get reference to the parent of the JSON pointer ptr
+        const auto last_path = ptr.back();
+        ptr.pop_back();
+        BasicJsonType& parent = result.at(ptr);
+
+        // remove child
+        if (parent.is_object())
+        {
+            // perform range check
+            auto it = parent.find(last_path);
+            if (JSON_HEDLEY_LIKELY(it != parent.end()))
+            {
+                parent.erase(it);
+            }
+            else
+            {
+                JSON_THROW(detail::out_of_range::create(403, detail::concat("key '", last_path, "' not found"), &result));
+            }
+        }
+        else if (parent.is_array())
+        {
+            // note erase performs range check
+            parent.erase(json_pointer_t::template array_index<BasicJsonType>(last_path));
+        }
+        else
+        {
+            // the parent of a "remove" target must be an object or array
+            // (see #5396)
+            JSON_THROW(detail::out_of_range::create(413, detail::concat("cannot remove value: the JSON Patch 'remove' target's parent is of type ", parent.type_name(), ", but must be an object or array"), &parent));
+        }
+    }
+
+    // RFC 6902 (section 4.4) forbids "from" from being a proper prefix of
+    // "path" for a "move" operation: a location cannot be moved into one of
+    // its own children.
+    static bool is_proper_prefix(const json_pointer_t& from, const json_pointer_t& to)
+    {
+        const auto from_size = from.reference_tokens.size();
+        if (from_size >= to.reference_tokens.size())
+        {
+            return false;
+        }
+        for (std::size_t i = 0; i < from_size; ++i)
+        {
+            if (!(from.reference_tokens[i] == to.reference_tokens[i]))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+};
 
 NLOHMANN_JSON_NAMESPACE_END
 
@@ -24060,6 +24637,9 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
     // can be restored when json_pointer backwards compatibility is removed
     // friend ::nlohmann::json_pointer<StringType>;
 
+    template<typename>
+    friend class ::nlohmann::json_patch_preflight;
+
     template<typename BasicJsonType, typename InputType>
     friend class ::nlohmann::detail::parser;
     friend ::nlohmann::detail::serializer<basic_json>;
@@ -24091,10 +24671,10 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
         const bool ignore_comments = false,
         const bool ignore_trailing_commas = false,
         const bool discard_number_values = false
-                                 )
+    )
     {
         return ::nlohmann::detail::parser<basic_json, InputAdapterType>(std::move(adapter),
-            std::move(cb), allow_exceptions, ignore_comments, ignore_trailing_commas, discard_number_values);
+               std::move(cb), allow_exceptions, ignore_comments, ignore_trailing_commas, discard_number_values);
     }
 
   private:
@@ -24858,8 +25438,8 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
                detail::enable_if_t <
                    !detail::is_basic_json<U>::value && detail::is_compatible_type<basic_json_t, U>::value, int > = 0 >
     basic_json(CompatibleType && val) noexcept(noexcept( // NOLINT(bugprone-forwarding-reference-overload,bugprone-exception-escape)
-            JSONSerializer<U>::to_json(std::declval<basic_json_t&>(),
-                                       std::forward<CompatibleType>(val))))
+                JSONSerializer<U>::to_json(std::declval<basic_json_t&>(),
+                                           std::forward<CompatibleType>(val))))
     {
         JSONSerializer<U>::to_json(*this, std::forward<CompatibleType>(val));
         set_parents();
@@ -25681,7 +26261,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
                    detail::has_from_json<basic_json_t, ValueType>::value,
                    int > = 0 >
     ValueType get_impl(detail::priority_tag<0> /*unused*/) const noexcept(noexcept(
-            JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>(), std::declval<ValueType&>())))
+                JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>(), std::declval<ValueType&>())))
     {
         auto ret = ValueType();
         JSONSerializer<ValueType>::from_json(*this, ret);
@@ -25723,7 +26303,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
                    detail::has_non_default_from_json<basic_json_t, ValueType>::value,
                    int > = 0 >
     ValueType get_impl(detail::priority_tag<1> /*unused*/) const noexcept(noexcept(
-            JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>())))
+                JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>())))
     {
         return JSONSerializer<ValueType>::from_json(*this);
     }
@@ -25873,7 +26453,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
                    detail::has_from_json<basic_json_t, ValueType>::value,
                    int > = 0 >
     ValueType & get_to(ValueType& v) const noexcept(noexcept(
-            JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>(), v)))
+                JSONSerializer<ValueType>::from_json(std::declval<const basic_json_t&>(), v)))
     {
         JSONSerializer<ValueType>::from_json(*this, v);
         return v;
@@ -29184,6 +29764,19 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
         basic_json result = *this;
         result.patch_inplace(json_patch);
         return result;
+    }
+
+    /// @brief preflights a JSON patch without modifying the document
+    ///
+    /// The preflight applies each operation to an internal copy of the
+    /// document. If an operation fails, all subsequent operations are marked
+    /// @a blocked and are not checked, because the state of the internal copy
+    /// is uncertain. The original document and the patch are never modified.
+    ///
+    /// @sa https://json.nlohmann.me/api/basic_json/preflight_patch/
+    json_patch_preflight_report preflight_patch(const basic_json& json_patch) const
+    {
+        return json_patch_preflight<basic_json>::check(*this, json_patch);
     }
 
     /// @brief creates a diff as a JSON patch

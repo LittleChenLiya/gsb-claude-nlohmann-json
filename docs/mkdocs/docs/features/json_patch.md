@@ -45,3 +45,23 @@ The library can also calculate a JSON patch (i.e., a **diff**) given two JSON va
     ```json
     --8<-- "examples/diff.output"
     ```
+
+## Preflight
+
+Before applying a JSON Patch, you can use the `preflight_patch` function to check whether the patch would succeed
+without modifying the document or the patch. The preflight applies each operation to an internal copy of the document
+and reports, for every operation, whether it would succeed, fail, or be blocked because an earlier operation failed.
+
+??? example
+
+    The following code shows how a JSON patch is preflighted against a value.
+
+    ```cpp
+    --8<-- "examples/preflight_patch.cpp"
+    ```
+
+    Output:
+
+    ```text
+    --8<-- "examples/preflight_patch.output"
+    ```

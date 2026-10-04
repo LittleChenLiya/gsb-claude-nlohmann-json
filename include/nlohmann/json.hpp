@@ -58,6 +58,7 @@
 #include <nlohmann/detail/iterators/primitive_iterator.hpp>
 #include <nlohmann/detail/json_custom_base_class.hpp>
 #include <nlohmann/detail/json_pointer.hpp>
+#include <nlohmann/detail/json_patch_preflight.hpp>
 #include <nlohmann/detail/json_ref.hpp>
 #include <nlohmann/detail/macro_scope.hpp>
 #include <nlohmann/detail/string_concat.hpp>
@@ -134,6 +135,9 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
     friend class ::nlohmann::json_pointer;
     // can be restored when json_pointer backwards compatibility is removed
     // friend ::nlohmann::json_pointer<StringType>;
+
+    template<typename>
+    friend class ::nlohmann::json_patch_preflight;
 
     template<typename BasicJsonType, typename InputType>
     friend class ::nlohmann::detail::parser;
@@ -5259,6 +5263,19 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
         basic_json result = *this;
         result.patch_inplace(json_patch);
         return result;
+    }
+
+    /// @brief preflights a JSON patch without modifying the document
+    ///
+    /// The preflight applies each operation to an internal copy of the
+    /// document. If an operation fails, all subsequent operations are marked
+    /// @a blocked and are not checked, because the state of the internal copy
+    /// is uncertain. The original document and the patch are never modified.
+    ///
+    /// @sa https://json.nlohmann.me/api/basic_json/preflight_patch/
+    json_patch_preflight_report preflight_patch(const basic_json& json_patch) const
+    {
+        return json_patch_preflight<basic_json>::check(*this, json_patch);
     }
 
     /// @brief creates a diff as a JSON patch

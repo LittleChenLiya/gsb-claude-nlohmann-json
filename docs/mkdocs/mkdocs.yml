@@ -203,6 +203,7 @@ nav:
           - 'parser_callback_t': api/basic_json/parser_callback_t.md
           - 'patch': api/basic_json/patch.md
           - 'patch_inplace': api/basic_json/patch_inplace.md
+          - 'preflight_patch': api/basic_json/preflight_patch.md
           - 'push_back': api/basic_json/push_back.md
           - 'rbegin': api/basic_json/rbegin.md
           - 'rend': api/basic_json/rend.md

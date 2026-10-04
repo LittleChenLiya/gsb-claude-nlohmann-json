@@ -768,6 +768,269 @@ TEST_CASE("JSON patch")
 #endif // !defined(JSON_NOEXCEPTION)
     }
 
+    SECTION("preflight_patch")
+    {
+        using status = nlohmann::json_patch_preflight_status;
+
+        SECTION("all operations succeed")
+        {
+            json const doc = R"({"a": 1, "b": 2})"_json;
+            json const patch = R"([
+                {"op": "replace", "path": "/a", "value": 10},
+                {"op": "add", "path": "/c", "value": 3},
+                {"op": "test", "path": "/b", "value": 2}
+            ])"_json;
+
+            auto const report = doc.preflight_patch(patch);
+            CHECK(report.ok());
+            CHECK(report.operations.size() == 3);
+            for (const auto& op : report.operations)
+            {
+                CHECK(op.status == status::ok);
+                CHECK(op.message.empty());
+            }
+            CHECK(report.operations[0].index == 0);
+            CHECK(report.operations[0].op == "replace");
+            CHECK(report.operations[0].path == "/a");
+            CHECK(report.operations[1].index == 1);
+            CHECK(report.operations[1].op == "add");
+            CHECK(report.operations[2].index == 2);
+            CHECK(report.operations[2].op == "test");
+        }
+
+        SECTION("first failure blocks subsequent operations")
+        {
+            // acceptance: replace /a succeeds, test /b fails, remove is blocked;
+            // the original document still has the old "a"
+            json const doc = R"({"a": "old", "b": 2})"_json;
+            json const patch = R"([
+                {"op": "replace", "path": "/a", "value": "new"},
+                {"op": "test", "path": "/b", "value": 3},
+                {"op": "remove", "path": "/a"}
+            ])"_json;
+
+            auto const report = doc.preflight_patch(patch);
+            CHECK_FALSE(report.ok());
+            CHECK(report.operations.size() == 3);
+
+            CHECK(report.operations[0].status == status::ok);
+            CHECK(report.operations[0].index == 0);
+            CHECK(report.operations[0].op == "replace");
+            CHECK(report.operations[0].path == "/a");
+
+            CHECK(report.operations[1].status == status::failed);
+            CHECK(report.operations[1].index == 1);
+            CHECK(report.operations[1].op == "test");
+            CHECK(report.operations[1].path == "/b");
+            CHECK_FALSE(report.operations[1].message.empty());
+
+            CHECK(report.operations[2].status == status::blocked);
+            CHECK(report.operations[2].index == 2);
+            CHECK(report.operations[2].op == "remove");
+            CHECK(report.operations[2].path == "/a");
+
+            // the original document is unchanged
+            CHECK(doc.at("a") == "old");
+            CHECK(doc.at("b") == 2);
+        }
+
+        SECTION("move from missing gives from diagnostic")
+        {
+            json const doc = R"({"a": 1})"_json;
+            json const patch = R"([
+                {"op": "move", "from": "/x", "path": "/a"}
+            ])"_json;
+
+            auto const report = doc.preflight_patch(patch);
+            CHECK_FALSE(report.ok());
+            CHECK(report.operations.size() == 1);
+            CHECK(report.operations[0].status == status::failed);
+            CHECK(report.operations[0].index == 0);
+            CHECK(report.operations[0].op == "move");
+            CHECK(report.operations[0].path == "/a");
+            CHECK(report.operations[0].from == "/x");
+            // the diagnostic must mention the "from" path
+            CHECK(report.operations[0].message.find("from") != std::string::npos);
+            CHECK(report.operations[0].message.find("/x") != std::string::npos);
+
+            // the original document is unchanged
+            CHECK(doc.at("a") == 1);
+        }
+
+        SECTION("copy from missing gives from diagnostic")
+        {
+            json const doc = R"({"a": 1})"_json;
+            json const patch = R"([
+                {"op": "copy", "from": "/x", "path": "/a"}
+            ])"_json;
+
+            auto const report = doc.preflight_patch(patch);
+            CHECK_FALSE(report.ok());
+            CHECK(report.operations[0].status == status::failed);
+            CHECK(report.operations[0].from == "/x");
+            CHECK(report.operations[0].message.find("from") != std::string::npos);
+        }
+
+        SECTION("array dash is only valid for add")
+        {
+            json const doc = R"([1, 2, 3])"_json;
+
+            SECTION("add with dash appends")
+            {
+                json const patch = R"([{"op": "add", "path": "/-", "value": 4}])"_json;
+                auto const report = doc.preflight_patch(patch);
+                CHECK(report.ok());
+                CHECK(report.operations[0].status == status::ok);
+            }
+
+            SECTION("remove with dash fails")
+            {
+                json const patch = R"([{"op": "remove", "path": "/-"}])"_json;
+                auto const report = doc.preflight_patch(patch);
+                CHECK_FALSE(report.ok());
+                CHECK(report.operations[0].status == status::failed);
+            }
+
+            SECTION("replace with dash fails")
+            {
+                json const patch = R"([{"op": "replace", "path": "/-", "value": 4}])"_json;
+                auto const report = doc.preflight_patch(patch);
+                CHECK_FALSE(report.ok());
+                CHECK(report.operations[0].status == status::failed);
+            }
+
+            SECTION("test with dash fails")
+            {
+                json const patch = R"([{"op": "test", "path": "/-", "value": 4}])"_json;
+                auto const report = doc.preflight_patch(patch);
+                CHECK_FALSE(report.ok());
+                CHECK(report.operations[0].status == status::failed);
+            }
+        }
+
+        SECTION("root path")
+        {
+            json const doc = R"({"a": 1})"_json;
+            json const patch = R"([{"op": "replace", "path": "", "value": [1, 2, 3]}])"_json;
+
+            auto const report = doc.preflight_patch(patch);
+            CHECK(report.ok());
+            CHECK(report.operations[0].path == "");
+            CHECK(report.operations[0].status == status::ok);
+        }
+
+        SECTION("pointer escaping")
+        {
+            json const doc = R"({"a/b": 1, "c~d": 2})"_json;
+            json const patch = R"([
+                {"op": "replace", "path": "/a~1b", "value": 10},
+                {"op": "replace", "path": "/c~0d", "value": 20}
+            ])"_json;
+
+            auto const report = doc.preflight_patch(patch);
+            CHECK(report.ok());
+            CHECK(report.operations[0].path == "/a~1b");
+            CHECK(report.operations[1].path == "/c~0d");
+        }
+
+        SECTION("input is not modified")
+        {
+            json doc = R"({"a": 1})"_json;
+            json const patch = R"([
+                {"op": "add", "path": "/b", "value": 2},
+                {"op": "test", "path": "/a", "value": 1}
+            ])"_json;
+
+            json const doc_copy = doc;
+            json const patch_copy = patch;
+
+            auto const report = doc.preflight_patch(patch);
+            CHECK(report.ok());
+
+            // the original document and patch are unchanged
+            CHECK(doc == doc_copy);
+            CHECK(patch == patch_copy);
+        }
+
+        SECTION("input is not modified even on failure")
+        {
+            json doc = R"({"a": 1})"_json;
+            json const patch = R"([
+                {"op": "replace", "path": "/a", "value": 2},
+                {"op": "test", "path": "/a", "value": 99}
+            ])"_json;
+
+            json const doc_copy = doc;
+            json const patch_copy = patch;
+
+            auto const report = doc.preflight_patch(patch);
+            CHECK_FALSE(report.ok());
+
+            // the original document and patch are unchanged
+            CHECK(doc == doc_copy);
+            CHECK(patch == patch_copy);
+            CHECK(doc.at("a") == 1);
+        }
+
+        SECTION("not an array")
+        {
+            json const doc = R"({"a": 1})"_json;
+            json const patch = R"({"op": "add", "path": "/b", "value": 2})"_json;
+
+            auto const report = doc.preflight_patch(patch);
+            CHECK_FALSE(report.ok());
+            CHECK(report.operations.size() == 1);
+            CHECK(report.operations[0].status == status::failed);
+        }
+
+        SECTION("missing member")
+        {
+            json const doc = R"({"a": 1})"_json;
+            json const patch = R"([{"op": "add", "path": "/b"}])"_json;
+
+            auto const report = doc.preflight_patch(patch);
+            CHECK_FALSE(report.ok());
+            CHECK(report.operations[0].status == status::failed);
+            CHECK(report.operations[0].message.find("value") != std::string::npos);
+        }
+
+        SECTION("invalid op")
+        {
+            json const doc = R"({"a": 1})"_json;
+            json const patch = R"([{"op": "frobnicate", "path": "/b", "value": 2}])"_json;
+
+            auto const report = doc.preflight_patch(patch);
+            CHECK_FALSE(report.ok());
+            CHECK(report.operations[0].status == status::failed);
+            CHECK(report.operations[0].message.find("frobnicate") != std::string::npos);
+        }
+
+        SECTION("test failure is not just a syntax check")
+        {
+            // the preflight must actually check the test value against the
+            // document, not just validate the patch syntax
+            json const doc = R"({"a": 1})"_json;
+            json const patch = R"([{"op": "test", "path": "/a", "value": 2}])"_json;
+
+            auto const report = doc.preflight_patch(patch);
+            CHECK_FALSE(report.ok());
+            CHECK(report.operations[0].status == status::failed);
+            CHECK(report.operations[0].message.find("unsuccessful") != std::string::npos);
+        }
+
+        SECTION("target existence is checked")
+        {
+            // the preflight must actually check that the target exists, not
+            // just validate the patch syntax
+            json const doc = R"({"a": 1})"_json;
+            json const patch = R"([{"op": "remove", "path": "/nonexistent"}])"_json;
+
+            auto const report = doc.preflight_patch(patch);
+            CHECK_FALSE(report.ok());
+            CHECK(report.operations[0].status == status::failed);
+        }
+    }
+
     SECTION("errors")
     {
         SECTION("unknown operation")

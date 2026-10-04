@@ -40,6 +40,9 @@ class json_pointer
     friend class basic_json;
 
     template<typename>
+    friend class json_patch_preflight;
+
+    template<typename>
     friend class json_pointer;
 
     template<typename T>

@@ -1,0 +1,14 @@
+Preflight report:
+------------------------------------------------------------
+[0] replace   path=/a  status=ok
+[1] test      path=/b  status=failed
+    message: unsuccessful: {"op":"test","path":"/b","value":3}
+[2] remove    path=/a  status=blocked
+------------------------------------------------------------
+overall: failed
+
+Original document (unchanged):
+{
+    "a": "old",
+    "b": 2
+}
