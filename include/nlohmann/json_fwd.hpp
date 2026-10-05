@@ -55,6 +55,11 @@ class basic_json;
 template<typename RefStringType>
 class json_pointer;
 
+/// @brief an explicit, compiled plan to resolve several JSON pointers through one document
+/// @sa https://json.nlohmann.me/api/json_pointer_plan/
+template<typename RefStringType>
+class json_pointer_plan;
+
 /*!
 @brief default specialization
 @sa https://json.nlohmann.me/api/json/

@@ -58,6 +58,7 @@
 #include <nlohmann/detail/iterators/primitive_iterator.hpp>
 #include <nlohmann/detail/json_custom_base_class.hpp>
 #include <nlohmann/detail/json_pointer.hpp>
+#include <nlohmann/detail/json_pointer_plan.hpp>
 #include <nlohmann/detail/json_ref.hpp>
 #include <nlohmann/detail/macro_scope.hpp>
 #include <nlohmann/detail/string_concat.hpp>

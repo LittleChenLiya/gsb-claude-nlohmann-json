@@ -42,6 +42,9 @@ class json_pointer
     template<typename>
     friend class json_pointer;
 
+    template<typename>
+    friend class json_pointer_plan;
+
     template<typename T>
     struct string_t_helper
     {

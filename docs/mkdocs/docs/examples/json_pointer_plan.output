@@ -1,0 +1,8 @@
+plan contains 6 requests
+
+request 0: success, value = 1
+request 1: success, value = 2
+request 2: success, value = null
+request 3: success, value = 10
+request 4: error = array_out_of_range, failed_prefix = /c
+request 5: error = missing_key, failed_prefix = /d
