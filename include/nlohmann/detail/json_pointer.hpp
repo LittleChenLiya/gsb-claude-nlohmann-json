@@ -16,10 +16,12 @@
     #include <iosfwd> // ostream
 #endif  // JSON_NO_IO
 #include <limits> // max
+#include <map> // map
+#include <memory> // shared_ptr
 #include <numeric> // accumulate
 #include <set> // set
 #include <string> // string
-#include <utility> // move
+#include <utility> // move, pair
 #include <vector> // vector
 
 #include <nlohmann/detail/exceptions.hpp>
@@ -30,6 +32,9 @@
 
 NLOHMANN_JSON_NAMESPACE_BEGIN
 
+template<typename BasicJsonType>
+class json_pointer_plan;
+
 /// @brief JSON Pointer defines a string syntax for identifying a specific value within a JSON document
 /// @sa https://json.nlohmann.me/api/json_pointer/
 template<typename RefStringType>
@@ -38,6 +43,10 @@ class json_pointer
     // allow basic_json to access private members
     NLOHMANN_BASIC_JSON_TPL_DECLARATION
     friend class basic_json;
+
+    // allow json_pointer_plan to tokenize pointers when compiling a plan
+    template<typename>
+    friend class json_pointer_plan;
 
     template<typename>
     friend class json_pointer;
@@ -1163,5 +1172,377 @@ inline bool operator<(const json_pointer<RefStringTypeLhs>& lhs,
     return lhs.reference_tokens < rhs.reference_tokens;
 }
 #endif
+
+/*!
+@brief an explicit batch resolution plan for JSON pointers
+
+A json_pointer_plan collects several JSON pointer requests, merges their
+common reference-token prefixes into a single traversal tree (the "compile"
+step, see add()), and resolves all requests against a `const` JSON value in
+one pass (see execute()), so every shared prefix is accessed exactly once.
+
+The JSON value is never modified (unlike `operator[]`, no keys are inserted
+for missing intermediate objects), and each request yields an independently
+owned copy of the addressed value plus a classified error. All requests that
+fail at the same shared prefix observe the very same error source. Numeric
+reference tokens are only interpreted as array indices when the current
+value is an array; for objects they are ordinary keys.
+
+@note This class does not change the behavior of basic_json::at; it is a
+      separate, non-throwing batch API.
+*/
+template<typename BasicJsonType>
+class json_pointer_plan
+{
+  public:
+    /// @brief string type used by the JSON value
+    using string_t = typename BasicJsonType::string_t;
+    /// @brief JSON pointer type of the plan
+    using pointer_type = json_pointer<string_t>;
+    /// @brief size type of the JSON value
+    using size_type = typename BasicJsonType::size_type;
+
+    /// @brief classification of the outcome of a single request
+    enum class status
+    {
+        value,               ///< the request resolves to an existing non-null value
+        null_value,          ///< the request resolves to an existing null value
+        missing_key,         ///< an object key on the path does not exist
+        wrong_container,     ///< a reference token was applied to a value that is not a matching container
+        array_out_of_bounds  ///< an array index on the path is out of bounds
+    };
+
+    /// @brief classified error shared by all requests affected by the same failing prefix
+    struct error
+    {
+        status kind;      ///< the failure classification
+        string_t prefix;  ///< the JSON pointer up to and including the failing reference token
+        string_t token;   ///< the reference token that could not be resolved
+        string_t message; ///< a human-readable description of the failure
+    };
+
+    /// @brief the independently owned outcome of a single request
+    struct result
+    {
+        status outcome = status::missing_key;                ///< classification of this outcome
+        string_t pointer{};                                  ///< the requested JSON pointer
+        std::size_t canonical = 0;                           ///< slot of the first identical request (identity of duplicates)
+        BasicJsonType value = nullptr;                       ///< independently owned copy of the addressed value
+        std::shared_ptr<const error> error_source = nullptr; ///< shared error source; `nullptr` on success
+
+        /// @brief whether the request resolved to an existing value (including `null`)
+        bool ok() const noexcept
+        {
+            return outcome == status::value || outcome == status::null_value;
+        }
+    };
+
+    /// @brief access statistics of a single execute() pass
+    struct statistics
+    {
+        std::size_t nodes_visited = 0;                 ///< number of trie nodes resolved against the JSON value
+        std::map<string_t, std::size_t> prefix_visits; ///< number of accesses per JSON pointer prefix
+    };
+
+    /// @brief add a request for the JSON pointer @a ptr; returns the request slot
+    /// @note Adding the same pointer twice preserves the identity of each
+    ///       query: every call gets its own slot, but duplicate queries share
+    ///       one trie leaf and are resolved in a single traversal.
+    std::size_t add(const pointer_type& ptr)
+    {
+        const string_t key = ptr.to_string();
+
+        const auto duplicate = dedupe_.find(key);
+        if (duplicate != dedupe_.end())
+        {
+            // duplicate query: keep its own request slot (identity preserved)
+            // but resolve it through the already compiled trie leaf
+            const std::size_t first = duplicate->second;
+            const std::size_t slot = requests_.size();
+            requests_.push_back(ptr);
+            canonical_.push_back(first);
+            leaves_.push_back(leaves_[first]);
+            nodes_[leaves_[first]].requests.push_back(slot);
+            return slot;
+        }
+
+        // compile the pointer into the shared prefix tree
+        std::size_t current = 0; // node 0 is the root (empty pointer)
+        string_t prefix;
+        for (const auto& token : pointer_type::split(key))
+        {
+            prefix = detail::concat<string_t>(prefix, '/', detail::escape(token));
+            auto& children = nodes_[current].children;
+            const auto it = children.find(token);
+            if (it == children.end())
+            {
+                const std::size_t next = nodes_.size();
+                children.emplace(token, next);
+                node child;
+                child.prefix = prefix;
+                nodes_.push_back(std::move(child));
+                current = next;
+            }
+            else
+            {
+                current = it->second;
+            }
+        }
+
+        const std::size_t slot = requests_.size();
+        requests_.push_back(ptr);
+        canonical_.push_back(slot);
+        leaves_.push_back(current);
+        dedupe_.emplace(key, slot);
+        nodes_[current].requests.push_back(slot);
+        return slot;
+    }
+
+    /// @brief add a request for the JSON pointer string @a s; returns the request slot
+    std::size_t add(const string_t& s)
+    {
+        return add(pointer_type(s));
+    }
+
+    /// @brief the number of added requests (duplicates keep their own slots)
+    std::size_t request_count() const noexcept
+    {
+        return requests_.size();
+    }
+
+    /// @brief the number of distinct JSON pointers in the plan
+    std::size_t unique_count() const noexcept
+    {
+        return dedupe_.size();
+    }
+
+    /// @brief the JSON pointer requested by slot @a slot
+    const pointer_type& request(std::size_t slot) const
+    {
+        return requests_.at(slot);
+    }
+
+    /// @brief the merged prefixes of the compiled plan in construction order
+    std::vector<string_t> prefixes() const
+    {
+        std::vector<string_t> result;
+        result.reserve(nodes_.size());
+        for (const auto& n : nodes_)
+        {
+            result.push_back(n.prefix);
+        }
+        return result;
+    }
+
+    /*!
+    @brief resolve all requests against @a root in a single pass
+
+    Every shared prefix of the requested pointers is accessed exactly once.
+    The value @a root is only read, never modified. Each returned result
+    holds an independently owned deep copy of the addressed value, so the
+    results stay valid and unchanged when @a root is modified afterwards.
+
+    @param[in] root  the JSON value to resolve the requests against
+    @param[in,out] stats  optional access statistics of this pass
+    @return one result per request, in the order the requests were added
+    */
+    std::vector<result> execute(const BasicJsonType& root, statistics* stats = nullptr) const
+    {
+        std::vector<result> results(requests_.size());
+        for (std::size_t slot = 0; slot < requests_.size(); ++slot)
+        {
+            results[slot].pointer = requests_[slot].to_string();
+            results[slot].canonical = canonical_[slot];
+        }
+
+        // iterative depth-first traversal of the compiled prefix tree
+        std::vector<std::pair<std::size_t, const BasicJsonType*>> stack;
+        stack.emplace_back(0, &root);
+        while (!stack.empty())
+        {
+            const auto frame = stack.back();
+            stack.pop_back();
+            const std::size_t node_index = frame.first;
+            const BasicJsonType* value = frame.second;
+            const node& current = nodes_[node_index];
+
+            if (stats != nullptr)
+            {
+                ++stats->nodes_visited;
+                ++stats->prefix_visits[current.prefix];
+            }
+
+            // resolve all requests ending at this node
+            for (const auto slot : current.requests)
+            {
+                auto& res = results[slot];
+                res.value = *value; // independently owned deep copy
+                res.outcome = value->is_null() ? status::null_value : status::value;
+            }
+
+            // resolve each child token once; a failure is shared by the
+            // requests of the whole subtree below the failing prefix
+            for (const auto& child : current.children)
+            {
+                const string_t& token = child.first;
+                const node& child_node = nodes_[child.second];
+                const BasicJsonType* next = nullptr;
+                std::shared_ptr<const error> failure;
+
+                switch (value->type())
+                {
+                    case detail::value_t::object:
+                    {
+                        // numeric tokens are ordinary object keys here and
+                        // are never reinterpreted as array indices
+                        const auto it = value->find(token);
+                        if (JSON_HEDLEY_UNLIKELY(it == value->end()))
+                        {
+                            failure = make_error(status::missing_key, child_node, token,
+                                                 detail::concat<string_t>("unresolved reference token '", token, "'"));
+                        }
+                        else
+                        {
+                            next = std::addressof(*it);
+                        }
+                        break;
+                    }
+
+                    case detail::value_t::array:
+                    {
+                        size_type idx = 0;
+                        if (!parse_array_index(token, idx))
+                        {
+                            failure = make_error(status::array_out_of_bounds, child_node, token,
+                                                 detail::concat<string_t>("array index '", token, "' is not a valid array index"));
+                        }
+                        else if (JSON_HEDLEY_UNLIKELY(idx >= value->size()))
+                        {
+                            failure = make_error(status::array_out_of_bounds, child_node, token,
+                                                 detail::concat<string_t>("array index '", token, "' is out of range"));
+                        }
+                        else
+                        {
+                            next = std::addressof(value->operator[](idx));
+                        }
+                        break;
+                    }
+
+                    case detail::value_t::null:
+                    case detail::value_t::string:
+                    case detail::value_t::boolean:
+                    case detail::value_t::number_integer:
+                    case detail::value_t::number_unsigned:
+                    case detail::value_t::number_float:
+                    case detail::value_t::binary:
+                    case detail::value_t::discarded:
+                    default:
+                    {
+                        failure = make_error(status::wrong_container, child_node, token,
+                                             detail::concat<string_t>("cannot resolve reference token '", token, "' on a non-container value"));
+                        break;
+                    }
+                }
+
+                if (failure != nullptr)
+                {
+                    fail_subtree(child.second, failure, results);
+                }
+                else
+                {
+                    stack.emplace_back(child.second, next);
+                }
+            }
+        }
+
+        return results;
+    }
+
+  private:
+    /// a node of the compiled prefix tree
+    struct node
+    {
+        string_t prefix;                        ///< JSON pointer from the root to this node
+        std::map<string_t, std::size_t> children; ///< reference token -> child node index
+        std::vector<std::size_t> requests;      ///< request slots resolved at this node
+    };
+
+    /// create the shared error source for a failing prefix
+    static std::shared_ptr<const error> make_error(status kind, const node& where, const string_t& token, const string_t& message)
+    {
+        error e;
+        e.kind = kind;
+        e.prefix = where.prefix;
+        e.token = token;
+        e.message = message;
+        return std::make_shared<const error>(std::move(e));
+    }
+
+    /// assign the shared error source @a failure to every request below node @a node_index
+    void fail_subtree(std::size_t node_index, const std::shared_ptr<const error>& failure, std::vector<result>& results) const
+    {
+        std::vector<std::size_t> stack(1, node_index);
+        while (!stack.empty())
+        {
+            const std::size_t current = stack.back();
+            stack.pop_back();
+            const node& n = nodes_[current];
+            for (const auto slot : n.requests)
+            {
+                auto& res = results[slot];
+                res.outcome = failure->kind;
+                res.error_source = failure; // same source identity for all affected requests
+            }
+            for (const auto& child : n.children)
+            {
+                stack.push_back(child.second);
+            }
+        }
+    }
+
+    /// parse @a s as an array index; returns false for '-', malformed, or unrepresentable indices
+    static bool parse_array_index(const string_t& s, size_type& idx)
+    {
+        // '-' (the element past the end) and empty tokens never address an element
+        if (s.empty() || (s.size() == 1 && s[0] == '-'))
+        {
+            return false;
+        }
+
+        // leading zeros are not allowed (cf. parse_error.106)
+        if (s.size() > 1 && s[0] == '0')
+        {
+            return false;
+        }
+
+        // only digits are allowed (cf. parse_error.109)
+        for (const auto c : s)
+        {
+            if (c < '0' || c > '9')
+            {
+                return false;
+            }
+        }
+
+        errno = 0; // strtoull() does not reset errno on success
+        char* p_end = nullptr; // NOLINT(misc-const-correctness)
+        const unsigned long long magnitude = std::strtoull(s.c_str(), &p_end, 10); // NOLINT(runtime/int)
+        if (JSON_HEDLEY_UNLIKELY(errno == ERANGE // the value exceeds ULLONG_MAX
+                                 || magnitude >= static_cast<unsigned long long>((std::numeric_limits<size_type>::max)()))) // NOLINT(runtime/int)
+        {
+            // the array index cannot be represented as size_type
+            return false;
+        }
+
+        idx = static_cast<size_type>(magnitude);
+        return true;
+    }
+
+    std::vector<node> nodes_{1};            ///< prefix tree; node 0 is the root (empty pointer)
+    std::vector<pointer_type> requests_;    ///< one slot per added request
+    std::vector<std::size_t> canonical_;    ///< request slot -> first slot with the same pointer
+    std::vector<std::size_t> leaves_;       ///< request slot -> prefix tree leaf
+    std::map<string_t, std::size_t> dedupe_; ///< pointer string -> first request slot
+};
 
 NLOHMANN_JSON_NAMESPACE_END

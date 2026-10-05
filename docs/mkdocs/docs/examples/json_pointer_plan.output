@@ -1,0 +1,14 @@
+requests: 7, unique: 6
+merged prefixes: "" "/a" "/a/x" "/a/y" "/a/n" "/a/missing" "/a/missing/deeper" "/list" "/list/5"
+/a/x -> value 1
+/a/y -> value 2
+/a/n -> null_value null
+/a/missing -> missing_key [/a/missing: unresolved reference token 'missing']
+/a/missing/deeper -> missing_key [/a/missing: unresolved reference token 'missing']
+/list/5 -> array_out_of_bounds [/list/5: array index '5' is out of range]
+/a/x -> value 1 (duplicate of #0)
+accesses to "/a": 1
+nodes visited: 6
+shared error source: true
+document unchanged by execute: true
+after modifying the document, the "/a/x" result is still 1
